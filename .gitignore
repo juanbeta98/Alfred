@@ -1,0 +1,4 @@
+data/data_raw/source
+data/data_raw/old
+data/data_clean/templates
+.DS_Store

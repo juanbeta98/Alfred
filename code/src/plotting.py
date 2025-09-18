@@ -1,0 +1,832 @@
+import pandas as pd
+import numpy as np
+
+import matplotlib.pyplot as plt
+
+import plotly.express as px
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+
+import seaborn as sns
+
+from datetime import timedelta
+
+from .metrics import collect_vt_metrics_range, compute_metrics_with_moves
+from .utils import codificacion_ciudades, get_city_name_from_code
+from .distance_utils import distance
+
+
+def plot_gantt_labors_by_driver(df: pd.DataFrame, day_str: str, driver_col: str | None = None,
+                            min_row_height: int = 28, max_left_margin: int = 420,
+                            tickfont_size: int = 11):
+    """
+    Genera un diagrama de Gantt para visualizar las labores realizadas por cada conductor en un día específico.
+
+    La función filtra las labores cuya fecha de inicio y fin ocurren completamente dentro del día indicado,
+    asigna etiquetas a cada conductor con el conteo de labores, y ajusta automáticamente el tamaño del gráfico
+    y los márgenes para optimizar la visualización de los nombres en el eje Y.
+
+    Parámetros
+    ----------
+    df : pd.DataFrame
+        DataFrame que contiene los datos de labores, incluyendo fechas de inicio y fin, 
+        categoría de la labor y la columna de conductor.
+    day_str : str
+        Fecha objetivo en formato reconocible por pandas (ej. "2025-08-12").
+    driver_col : str o None, opcional
+        Nombre de la columna que identifica al conductor. Si es None, se intentará detectar automáticamente
+        buscando variantes comunes ("alfred", "driver", "conductor", etc.).
+    min_row_height : int, opcional
+        Altura mínima en píxeles por fila/conductor en el gráfico. Valor por defecto: 28.
+    max_left_margin : int, opcional
+        Margen izquierdo máximo en píxeles para mostrar las etiquetas completas. Valor por defecto: 420.
+    tickfont_size : int, opcional
+        Tamaño de fuente para las etiquetas del eje Y. Valor por defecto: 11.
+
+    Retorno
+    -------
+    None
+        La función no retorna un valor. Muestra el diagrama de Gantt directamente utilizando Plotly.
+    
+    Notas
+    -----
+    - Solo se incluyen labores cuya fecha de inicio y fin estén completamente dentro del día especificado.
+    - Si no se encuentra una columna de conductor válida, se lanzará un KeyError.
+    - Las etiquetas del eje Y incluyen el nombre del conductor y el número de labores realizadas en el día.
+    """
+    if df is None or df.empty:
+        print("⚠️ DataFrame vacío.")
+        return
+
+    # Detección automática de columna conductor si no se pasa como argumento
+    if driver_col is None:
+        colmap = {c.lower(): c for c in df.columns}
+        driver_col = (colmap.get('alfred') or colmap.get("alfred's") or
+                    colmap.get('assigned_driver') or colmap.get('driver') or
+                    colmap.get('conductor') or colmap.get('alfred_id'))
+        if driver_col is None:
+            raise KeyError("No se encontró columna de conductor válida.")
+
+    # ⏳ Conversión a datetime y limpieza de filas con fechas inválidas
+    dfp = df.copy()
+    dfp['start_time'] = pd.to_datetime(dfp['start_time'], errors='coerce')
+    dfp['end_time']   = pd.to_datetime(dfp['end_time'], errors='coerce')
+    dfp = dfp.dropna(subset=['start_time','end_time'])
+
+    # Ventana diaria [start, end) y ajuste de zona horaria si aplica
+    start = pd.to_datetime(day_str).normalize()
+    tz = dfp['start_time'].dt.tz
+    if tz is not None and start.tzinfo is None:
+        start = start.tz_localize(tz)
+    end = start + pd.Timedelta(days=1)
+
+    # Filtro de labores del día con horas válidas y conductor no nulo
+    in_day = (
+        dfp['start_time'].between(start, end, inclusive='left') &
+        dfp['end_time'].between(start, end, inclusive='left') &
+        (dfp['end_time'] > dfp['start_time']) &
+        (dfp[driver_col].notna())
+    )
+    dfp = dfp.loc[in_day].copy()
+    if dfp.empty:
+        print("⚠️ No hay labores con conductor para ese día.")
+        return
+
+    # Etiqueta con nombre y conteo de labores
+    counts = dfp.groupby(driver_col).size()
+    dfp['driver_label'] = dfp[driver_col].map(lambda d: f"{d} ({int(counts.get(d,0))})")
+
+    # Columnas para tooltip en hover
+    hover_cols = [c for c in [
+        'labor_name','service_id','labor_id','labor_category',
+        'start_time','end_time'
+    ] if c in dfp.columns]
+
+    # Ajuste dinámico de altura y margen izquierdo
+    unique_labels = dfp['driver_label'].unique().tolist()
+    n_rows = len(unique_labels)
+    max_label_len = max(len(str(x)) for x in unique_labels)
+    left_margin = min(60 + 7 * max_label_len, max_left_margin)
+    height = max(320, int(min_row_height * (n_rows + 1)))
+
+    # Creación del gráfico Gantt
+    fig = px.timeline(
+        dfp.sort_values(['driver_label','start_time']),
+        x_start='start_time', x_end='end_time',
+        y='driver_label',
+        color='labor_category' if 'labor_category' in dfp.columns else None,
+        hover_data=hover_cols
+    )
+    fig.update_yaxes(autorange='reversed', type='category', automargin=True, tickfont=dict(size=tickfont_size))
+    fig.update_xaxes(tickangle=-45)
+    fig.update_layout(
+        title=f"Labores por conductor — {day_str}",
+        margin=dict(l=left_margin, r=80, t=60, b=60),
+        height=height,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+    )
+    fig.show()
+
+def plot_results(
+    df_cleaned: pd.DataFrame,
+    df_moves: pd.DataFrame,
+    day_str: str,
+    tiempo_gracia: int,
+    assignment_type: str):
+    """
+    Genera los gráficos tipo Gantt (por conductor y por servicio) y los muestra,
+    incluyendo órdenes fallidas, marcadores de llegadas tarde,
+    y el conteo de labors por conductor en el eje y.
+    """
+    if df_moves.empty:
+        print(f"⚠️ No hay tareas para el día {day_str}")
+        return
+    
+    # Selección dinámica de columnas de tiempo
+    if assignment_type == "historic":
+        start_col, end_col, alfred_col = "historic_start", "historic_end", "historic_driver"
+    elif assignment_type == "algorithm":
+        start_col, end_col, alfred_col = "actual_start", "actual_end", "assigned_driver"
+    else:
+        raise ValueError("assignment_type debe ser 'historic' o 'algorithm'")
+
+    # 1) Preparar DataFrame para plot
+    df_plot = df_moves[df_moves[alfred_col].notna()].copy()
+    df_plot[alfred_col] = df_plot[alfred_col].astype(str)
+
+    # 2) Calcular conteo de labors (excluyendo FREE_TIME y DRIVER_MOVE)
+    labor_counts = (
+        df_plot[~df_plot['labor_category'].isin(['FREE_TIME','DRIVER_MOVE'])]
+          .groupby(alfred_col).size()
+          .to_dict()
+    )
+
+    # 3) Construir mapping de etiquetas
+    y_labels = {
+        drv: f"{drv} ({labor_counts.get(drv,0)})"
+        for drv in df_plot[alfred_col].unique()
+    }
+
+    # 4) Gantt por conductores
+    fig = px.timeline(
+        df_plot,
+        x_start=start_col, x_end=end_col,
+        y=alfred_col, color="labor_category",
+        color_discrete_map={'FREE_TIME':'gray', 'DRIVER_MOVE':'lightblue'},
+        hover_data={
+            "labor_name":    True,
+            "service_id":    True,
+            "labor_id":      True,
+            "schedule_date": True,
+            "duration_min":  True,
+            "start_point":   True,
+            "end_point":     True
+        }
+    )
+    cats = fig.layout.yaxis.categoryarray or list(dict.fromkeys(df_plot[alfred_col]))
+    ticktext = [y_labels.get(cat, cat) for cat in cats]
+    fig.update_yaxes(
+        autorange="reversed",
+        type='category',
+        categoryorder='array',
+        categoryarray=cats,
+        ticktext=ticktext,
+        tickvals=cats
+    )
+    fig.update_layout(
+        height=max(600, len(cats)*30),
+        title=f"Tareas de Conductores ({day_str})"
+    )
+
+    # 5) Órdenes fallidas
+    fails = df_cleaned[
+        (df_cleaned['labor_category']=='VEHICLE_TRANSPORTATION') &
+        (df_cleaned[alfred_col].isna())
+    ]
+    if not fails.empty:
+        x_seg, y_seg = [], []
+        for sched in fails['schedule_date']:
+            x_seg += [sched, sched, None]
+            y_seg += [cats[0], cats[-1], None]
+        fig.add_trace(go.Scatter(
+            x=x_seg, y=y_seg, mode='lines',
+            line=dict(color='red', dash='dash'),
+            name='Fallido', legendgroup='Fallido'
+        ))
+        fig.add_trace(go.Scatter(
+            x=fails['schedule_date'],
+            y=[cats[0]]*len(fails),
+            mode='markers',
+            marker=dict(symbol='line-ns-open', color='red', size=12),
+            name='Fallido', legendgroup='Fallido',
+            customdata=fails[['service_id','labor_id','map_start_point']].values,
+            hovertemplate=(
+                "Fallido<br>Servicio: %{customdata[0]}<br>"
+                "Labor: %{customdata[1]}<br>"
+                "Ubicación: %{customdata[2]}<extra></extra>"
+            )
+        ))
+
+    # 6) Llegadas tarde
+    late_tasks = (
+        df_cleaned[df_cleaned['labor_category']=='VEHICLE_TRANSPORTATION']
+          .sort_values('schedule_date')
+          .groupby('service_id').first()
+          .reset_index()
+    )
+    if not late_tasks.empty:
+        late_tasks['late_dead'] = late_tasks['schedule_date'] + timedelta(minutes=tiempo_gracia)
+        late = late_tasks[
+            late_tasks[alfred_col].notna() &
+            (late_tasks[start_col] > late_tasks['late_dead'])
+        ].copy()
+        if not late.empty:
+            late['late_minutes'] = (
+                (late[start_col] - late['late_dead']).dt.total_seconds() / 60
+            ).round(1)
+            fig.add_trace(go.Scatter(
+                x=late[start_col],
+                y=late[alfred_col].astype(str),
+                mode='markers',
+                marker=dict(symbol='x', size=12, color='black'),
+                name='Llegada Tarde', legendgroup='Llegada Tarde',
+                customdata=late[['service_id','labor_id','late_minutes']].values,
+                hovertemplate=(
+                    "Llegada Tarde<br>Servicio: %{customdata[0]}<br>"
+                    "Labor: %{customdata[1]}<br>"
+                    "Retraso: %{customdata[2]} min<extra></extra>"
+                )
+            ))
+    fig.show()
+
+    # 7) Gantt por servicios con detalle
+    df_cleaned_plot = df_cleaned.dropna(subset=[start_col, end_col])
+    if not df_cleaned_plot.empty:
+        df_cleaned_plot['service_id_str'] = df_cleaned_plot['service_id'].astype(str)
+        df_cleaned_plot['driver_label']   = df_cleaned_plot[alfred_col].fillna('on site').astype(str)
+        fig2 = px.timeline(
+            df_cleaned_plot.sort_values(['service_id_str', start_col]),
+            x_start=start_col, x_end=end_col,
+            y="service_id_str", color="labor_category",
+            title=f"Detalle de Labors por Servicio ({day_str})",
+            hover_data=["driver_label","labor_name"]
+        )
+        fig2.update_yaxes(autorange="reversed", type='category')
+        fig2.update_layout(
+            height=max(600, len(df_cleaned_plot['service_id_str'].unique()))
+        )
+        fig2.show()
+
+
+def _plot_results(
+    df_cleaned: pd.DataFrame,
+    df_moves: pd.DataFrame,
+    day_str: str,
+    tiempo_gracia: int,
+    assignment_type: str):
+    """
+    Genera los gráficos tipo Gantt (por conductor y por servicio) y los muestra,
+    incluyendo órdenes fallidas, marcadores de llegadas tarde,
+    y el conteo de labors por conductor en el eje y.
+    """
+    if df_moves.empty:
+        print(f"⚠️ No hay tareas para el día {day_str}")
+        return
+    
+    # Selección dinámica de columnas de tiempo
+    if assignment_type == "historic":
+        start_col, end_col, alfred_col = "historic_start", "historic_end", 'historic_driver'
+    elif assignment_type == "algorithm":
+        start_col, end_col, alfred_col = "actual_start", "actual_end", 'assigned_driver'
+    else:
+        raise ValueError("assignment_type debe ser 'historic' o 'algorithm'")
+
+    # 1) Preparar DataFrame para plot
+    df_plot = df_moves[df_moves['assigned_driver'].notna()].copy()
+    df_plot['assigned_driver'] = df_plot['assigned_driver'].astype(str)
+
+    # 2) Calcular conteo de labors (excluyendo FREE_TIME y DRIVER_MOVE)
+    labor_counts = (
+        df_plot[~df_plot['labor_category'].isin(['FREE_TIME','DRIVER_MOVE'])]
+          .groupby('assigned_driver').size()
+          .to_dict()
+    )
+
+    # 3) Construir mapping de etiquetas
+    #    Ejemplo: "Roberto Amaya" → "Roberto Amaya (12)"
+    y_labels = {
+        drv: f"{drv} ({labor_counts.get(drv,0)})"
+        for drv in df_plot['assigned_driver'].unique()
+    }
+
+    # 4) Gantt por conductores
+    fig = px.timeline(
+        df_plot,
+        x_start="actual_start", x_end="actual_end",
+        y="assigned_driver", color="labor_category",
+        color_discrete_map={'FREE_TIME':'gray', 'DRIVER_MOVE':'lightblue'},
+        hover_data={
+            "labor_name":    True,
+            "service_id":    True,
+            "labor_id":      True,
+            "schedule_date": True,
+            "duration_min":  True,
+            "start_point":   True,
+            "end_point":     True
+        }
+    )
+    # Obtener orden original de categorías
+    cats = fig.layout.yaxis.categoryarray or list(dict.fromkeys(df_plot['assigned_driver']))
+    # Aplicar nuevas etiquetas con conteo de labors
+    ticktext = [y_labels.get(cat, cat) for cat in cats]
+    fig.update_yaxes(
+        autorange="reversed",
+        type='category',
+        categoryorder='array',
+        categoryarray=cats,
+        ticktext=ticktext,
+        tickvals=cats
+    )
+    fig.update_layout(
+        height=max(600, len(cats)*30),
+        title=f"Tareas de Conductores ({day_str})"
+    )
+
+    # 5) Órdenes fallidas
+    fails = df_cleaned[
+        (df_cleaned['labor_category']=='VEHICLE_TRANSPORTATION') &
+        (df_cleaned['assigned_driver'].isna())
+    ]
+    if not fails.empty:
+        x_seg, y_seg = [], []
+        for sched in fails['schedule_date']:
+            x_seg += [sched, sched, None]
+            y_seg += [cats[0], cats[-1], None]
+        fig.add_trace(go.Scatter(
+            x=x_seg, y=y_seg, mode='lines',
+            line=dict(color='red', dash='dash'),
+            name='Fallido', legendgroup='Fallido'
+        ))
+        fig.add_trace(go.Scatter(
+            x=fails['schedule_date'],
+            y=[cats[0]]*len(fails),
+            mode='markers',
+            marker=dict(symbol='line-ns-open', color='red', size=12),
+            name='Fallido', legendgroup='Fallido',
+            customdata=fails[['service_id','labor_id','map_start_point']].values,
+            hovertemplate=(
+                "Fallido<br>Servicio: %{customdata[0]}<br>"
+                "Labor: %{customdata[1]}<br>"
+                "Ubicación: %{customdata[2]}<extra></extra>"
+            )
+        ))
+
+    # 6) Llegadas tarde
+    late_tasks = (
+        df_cleaned[df_cleaned['labor_category']=='VEHICLE_TRANSPORTATION']
+          .sort_values('schedule_date')
+          .groupby('service_id').first()
+          .reset_index()
+    )
+    if not late_tasks.empty:
+        late_tasks['late_dead'] = late_tasks['schedule_date'] + timedelta(minutes=tiempo_gracia)
+        late = late_tasks[
+            late_tasks['assigned_driver'].notna() &
+            (late_tasks['actual_start'] > late_tasks['late_dead'])
+        ].copy()
+        if not late.empty:
+            late['late_minutes'] = (
+                (late['actual_start'] - late['late_dead'])
+                .dt.total_seconds() / 60
+            ).round(1)
+            fig.add_trace(go.Scatter(
+                x=late['actual_start'],
+                y=late['assigned_driver'].astype(str),
+                mode='markers',
+                marker=dict(symbol='x', size=12, color='black'),
+                name='Llegada Tarde', legendgroup='Llegada Tarde',
+                customdata=late[['service_id','labor_id','late_minutes']].values,
+                hovertemplate=(
+                    "Llegada Tarde<br>Servicio: %{customdata[0]}<br>"
+                    "Labor: %{customdata[1]}<br>"
+                    "Retraso: %{customdata[2]} min<extra></extra>"
+                )
+            ))
+    fig.show()
+
+    # 7) Gantt por servicios con detalle
+    df_cleaned_plot = df_cleaned.dropna(subset=['actual_start','actual_end'])
+    if not df_cleaned_plot.empty:
+
+        df_cleaned_plot['service_id_str'] = df_cleaned_plot['service_id'].astype(str)
+        df_cleaned_plot['driver_label']   = df_cleaned_plot['assigned_driver'].fillna('on site').astype(str)
+        fig2 = px.timeline(
+            df_cleaned_plot.sort_values(['service_id_str','actual_start']),
+            x_start="actual_start", x_end="actual_end",
+            y="service_id_str", color="labor_category",
+            title=f"Detalle de Labors por Servicio ({day_str})",
+            hover_data=["driver_label","labor_name"]
+        )
+        fig2.update_yaxes(autorange="reversed", type='category')
+        fig2.update_layout(
+            height=max(600, len(df_cleaned_plot['service_id_str'].unique()))
+        )
+        fig2.show()
+
+
+def plot_horizontal_bar_from_tuples(data, cities_df, title="Servicios por Ciudad", xlabel="Cantidad"):
+    """
+    Genera un gráfico de barras horizontal a partir de una lista de tuplas (cod_ciudad, valor),
+    mostrando el nombre real de la ciudad en vez del código.
+
+    Parámetros
+    ----------
+    data : list of tuples
+        Lista de tuplas donde el primer elemento es el código de ciudad (str o int)
+        y el segundo es el valor numérico.
+    cities_df : pd.DataFrame
+        DataFrame con columnas ['cod_ciudad', 'ciudad'] para mapear códigos a nombres.
+    title : str
+        Título del gráfico.
+    xlabel : str
+        Etiqueta del eje X.
+    """
+    # Crear diccionario de mapeo
+    city_map = dict(zip(cities_df["cod_ciudad"].astype(str), cities_df["ciudad"]))
+
+    # Reemplazar códigos por nombres en los labels
+    codes, values = zip(*data)
+    labels = [city_map.get(str(code), str(code)) for code in codes]
+
+    # Crear figura
+    plt.figure(figsize=(9, 6))
+    y = np.arange(len(labels))
+    bars = plt.barh(y, values, color=plt.cm.plasma(np.linspace(0.3, 0.8, len(labels))), height=0.6)
+
+    # Añadir valores al final de cada barra
+    for bar, value in zip(bars, values):
+        plt.text(
+            bar.get_width() + max(values) * 0.01,
+            bar.get_y() + bar.get_height() / 2,
+            f"{value:,}",
+            va="center",
+            fontsize=11,
+            fontweight="bold",
+            color="#333333"
+        )
+
+    # Estilo del gráfico
+    plt.title(title, fontsize=16, fontweight="bold", pad=20)
+    plt.xlabel(xlabel, fontsize=13)
+    plt.yticks(y, labels, fontsize=11)
+    plt.xticks(fontsize=11)
+    plt.grid(axis="x", linestyle="--", alpha=0.5)
+
+    # Quitar bordes extra
+    for spine in ["top", "right"]:
+        plt.gca().spines[spine].set_visible(False)
+
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_weekly_services(df, cities_to_plot, city_col="city", date_col="labor_start_date"):
+    """
+    Genera un gráfico de líneas del número semanal de servicios por ciudad y el total.
+    
+    Parámetros
+    ----------
+    df : pd.DataFrame
+        DataFrame con columnas `service_id`, `city` y `labor_start_date`.
+    cities_to_plot : list
+        Lista de códigos de ciudad a incluir en el gráfico.
+    city_col : str, default="city"
+        Nombre de la columna con el código de ciudad.
+    date_col : str, default="labor_start_date"
+        Nombre de la columna con la fecha de inicio del labor.
+    """
+
+    # Aseguramos que la columna de fecha esté en datetime
+    df[date_col] = pd.to_datetime(df[date_col])
+
+    # Agrupamos a nivel servicio para no contar varias veces un servicio con varios labores
+    df_unique = df.drop_duplicates(subset=["service_id", city_col])
+
+    # Agregamos columna de semana (lunes como inicio)
+    df_unique["week"] = df_unique[date_col].dt.to_period("W").apply(lambda r: r.start_time)
+
+    # Conteo semanal por ciudad
+    weekly_counts = (
+        df_unique.groupby(["week", city_col])["service_id"]
+        .nunique()
+        .reset_index(name="num_services")
+    )
+
+    # Pivot para tener cada ciudad como columna
+    weekly_pivot = weekly_counts.pivot(index="week", columns=city_col, values="num_services").fillna(0)
+
+    # Filtramos solo las ciudades deseadas
+    weekly_filtered = weekly_pivot[cities_to_plot].copy()
+
+    # Agregamos columna total
+    weekly_filtered["TOTAL"] = weekly_filtered.sum(axis=1)
+
+    # 🔎 Encontramos la semana con mayor total
+    max_week = weekly_filtered["TOTAL"].idxmax()
+    max_value = weekly_filtered["TOTAL"].max()
+    print(f"📊 La semana con más servicios fue {max_week.strftime('%Y-%m-%d')} con {max_value} servicios en total.")
+
+    # --- PLOTEO ---
+    plt.figure(figsize=(14, 6))
+    sns.set_style("whitegrid")
+
+    # Paleta de colores con seaborn
+    palette = sns.color_palette("Set2", len(cities_to_plot) + 1)
+
+    # Graficamos cada ciudad
+    for i, col in enumerate(weekly_filtered.columns):
+        city_name = codificacion_ciudades.get(col, col)
+        plt.plot(weekly_filtered.index, weekly_filtered[col],
+                 label=city_name, linewidth=2, marker="o", markersize=4, color=palette[i])
+
+    # Destacamos la semana máxima en el gráfico
+    plt.axvline(max_week, color="black", linestyle="--", alpha=0.7)
+    plt.text(max_week, max_value, f"   {max_value}", color="black", weight="bold")
+
+    plt.title("Servicios semanales por ciudad y total", fontsize=16, weight="bold")
+    plt.xlabel("Semana", fontsize=12)
+    plt.ylabel("Número de servicios", fontsize=12)
+    plt.legend(title="Ciudad", bbox_to_anchor=(1.05, 1), loc="upper left")
+    plt.tight_layout()
+
+    plt.show()
+
+
+def plot_daily_services_week(df, cities_to_plot, start_date, city_col="city", date_col="labor_start_date"):
+    """
+    Genera un gráfico de líneas del número diario de servicios por ciudad y el total,
+    limitado a un intervalo de 7 días a partir de `start_date`.
+
+    Parámetros
+    ----------
+    df : pd.DataFrame
+        DataFrame con columnas `service_id`, `city` y `labor_start_date`.
+    cities_to_plot : list
+        Lista de códigos de ciudad a incluir en el gráfico.
+    start_date : str o pd.Timestamp
+        Fecha de inicio de la semana (ej: '2023-07-03').
+    city_col : str, default="city"
+        Nombre de la columna con el código de ciudad.
+    date_col : str, default="labor_start_date"
+        Nombre de la columna con la fecha de inicio del labor.
+    """
+
+    df[date_col] = pd.to_datetime(df[date_col])
+    tz = df[date_col].dt.tz   # detecta la tz del dataframe
+    start_date = pd.to_datetime(start_date).tz_localize(tz)
+    end_date = start_date + pd.Timedelta(days=6)
+
+    # Agrupamos a nivel servicio para no contar varias veces un servicio con varios labores
+    df_unique = df.drop_duplicates(subset=["service_id", city_col])
+
+    # Filtramos por el intervalo de fechas
+    df_week = df_unique[(df_unique[date_col] >= start_date) & (df_unique[date_col] <= end_date)].copy()
+
+    # Conteo diario por ciudad
+    daily_counts = (
+        df_week.groupby([df_week[date_col].dt.date, city_col])["service_id"]
+        .nunique()
+        .reset_index(name="num_services")
+    )
+
+    # Pivot para tener cada ciudad como columna
+    daily_pivot = daily_counts.pivot(index=date_col, columns=city_col, values="num_services").fillna(0)
+
+    # Filtramos solo las ciudades deseadas
+    daily_filtered = daily_pivot[cities_to_plot].copy()
+
+    # Agregamos columna total
+    daily_filtered["TOTAL"] = daily_filtered.sum(axis=1)
+
+    # --- PLOTEO ---
+    plt.figure(figsize=(12, 6))
+    sns.set_style("whitegrid")
+
+    # Paleta de colores con seaborn
+    palette = sns.color_palette("Set2", len(cities_to_plot) + 1)
+
+    # Graficamos cada ciudad
+    for i, col in enumerate(daily_filtered.columns):
+        city_name = codificacion_ciudades.get(col, col)
+        plt.plot(daily_filtered.index, daily_filtered[col],
+                 label=city_name, linewidth=2, marker="o", markersize=6, color=palette[i])
+
+    # Título y labels
+    plt.title(f"Servicios diarios por ciudad ({start_date.strftime('%Y-%m-%d')} a {end_date.strftime('%Y-%m-%d')})",
+              fontsize=16, weight="bold")
+    plt.xlabel("Fecha", fontsize=12)
+    plt.ylabel("Número de servicios", fontsize=12)
+    plt.xticks(rotation=45)
+    plt.legend(title="Ciudad", bbox_to_anchor=(1.05, 1), loc="upper left")
+    plt.tight_layout()
+
+    plt.show()
+
+
+def plot_labor_duration_hist(df, city, labor_type, shop=None,
+                             city_col="city", labor_col="labor_type", 
+                             shop_col="shop", start_col="labor_start_date", 
+                             end_col="labor_end_date", bins=30):
+    """
+    Plot histogram of labor durations for a given city and labor type,
+    optionally filtered by shop.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Dataframe with labor records.
+    city : str
+        City code or name to filter.
+    labor_type : str
+        Labor type to filter.
+    shop : str, optional
+        Shop to filter (default None = all shops).
+    city_col, labor_col, shop_col : str
+        Column names for city, labor type, and shop.
+    start_col, end_col : str
+        Column names for start and end datetime.
+    bins : int
+        Number of bins in the histogram.
+    """
+
+    # Ensure datetimes
+    df[start_col] = pd.to_datetime(df[start_col], errors="coerce")
+    df[end_col] = pd.to_datetime(df[end_col], errors="coerce")
+
+    # Compute durations
+    df["duration_min"] = (df[end_col] - df[start_col]).dt.total_seconds() / 60
+    df = df.dropna(subset=["duration_min"])
+
+    # Remove durations > 1 day
+    df = df[df["duration_min"] <= 1440]
+
+    # Apply filters
+    df_filtered = df[(df[city_col] == city) & (df[labor_col] == labor_type)]
+    if shop is not None:
+        df_filtered = df_filtered[df_filtered[shop_col] == shop]
+
+    if df_filtered.empty:
+        print("⚠️ No data available for the given filters.")
+        return
+
+    # Plot
+    plt.figure(figsize=(8, 5))
+    sns.histplot(df_filtered["duration_min"], bins=bins, kde=True, color="skyblue")
+
+    title = f"Duration Distribution in {city} - {labor_type}"
+    if shop:
+        title += f" (Shop: {shop})"
+
+    plt.title(title, fontsize=14, weight="bold")
+    plt.xlabel("Duration (minutes)")
+    plt.ylabel("Frequency")
+    plt.grid(True, linestyle="--", alpha=0.6)
+    plt.show()
+
+
+def plot_metrics_comparison(labors_hist_df: pd.DataFrame,
+                            moves_hist_df: pd.DataFrame,
+                            labors_algo_df: pd.DataFrame,
+                            moves_algo_df: pd.DataFrame,
+                            city: str,
+                            metricas,
+                            dist_dict: dict,
+                            fechas: tuple[str, str]):
+    """
+    Genera gráficos comparativos de métricas entre solución real y algoritmo.
+    Muestra de a dos métricas por figura (side-by-side), con leyenda debajo.
+    """
+
+    # # --- 1. Recolectar métricas existentes ---
+    # metrics_real_df = collect_vt_metrics_range(
+    #     labors_hist_df,
+    #     start_date=fechas[0],
+    #     end_date=fechas[-1],
+    #     dist_dict=dist_dict,
+    #     workday_hours=8,
+    #     city_code=city,
+    #     skip_weekends=False,
+    #     assignment_type='historic'
+    # )
+
+    # metrics_algo_df = collect_vt_metrics_range(
+    #     labors_algo_df,
+    #     start_date=fechas[0],
+    #     end_date=fechas[-1],
+    #     dist_dict=dist_dict,
+    #     workday_hours=8,
+    #     city_code=city,
+    #     skip_weekends=False,
+    #     assignment_type='algorithm'
+    # )
+
+    # moves_hist_df = moves_hist_df[moves_hist_df['city'] == city]
+    # moves_algo_df = moves_algo_df[moves_algo_df['city'] == city]
+
+    # # --- 2. Agregar nueva métrica: distancia de movimientos de conductores ---
+    # def aggregate_driver_moves(moves_df: pd.DataFrame) -> pd.DataFrame:
+    #     df = moves_df[moves_df["labor_category"] == "DRIVER_MOVE"].copy()
+    #     if "distance_km" not in df.columns:
+    #         df["distance_km"] = df.apply(
+    #             lambda r: distance(r["start_point"], r["end_point"], method="haversine", dist_dict=dist_dict),
+    #             axis=1
+    #         )
+    #     df["day"] = pd.to_datetime(df["schedule_date"]).dt.date
+    #     df["day"] = df["day"].apply(lambda x: x.strftime("%Y-%m-%d"))
+    #     return df.groupby("day", as_index=False)["distance_km"].sum().rename(
+    #         columns={"distance_km": "driver_move_distance"}
+    #     )
+
+    # moves_real_exp_df = aggregate_driver_moves(moves_hist_df)
+    # moves_algo_exp_df = aggregate_driver_moves(moves_algo_df)
+
+    # metrics_real_df = metrics_real_df.merge(moves_real_exp_df, on="day", how="left").fillna(0)
+    # metrics_algo_df = metrics_algo_df.merge(moves_algo_exp_df, on="day", how="left").fillna(0)
+
+
+    metrics_real_df = compute_metrics_with_moves(labors_hist_df, moves_hist_df, fechas, dist_dict, 
+                                                 8, city, 'historic', False, 'haversine')
+    metrics_algo_df = compute_metrics_with_moves(labors_algo_df, moves_algo_df, fechas, dist_dict, 
+                                                 8, city, 'algorithm', False, 'haversine')
+
+    # --- 3. Labels ---
+    labels = {
+        "vt_count": "Labores tipo Vehicle Transportation",
+        "num_drivers": "Número de conductores",
+        "labores_por_conductor": "Labores por conductor",
+        "utilizacion_promedio_%": "Utilización promedio (%)",
+        "total_distance": "Distancia total (km)",
+        "driver_move_distance": "Distancia recorrida por conductores (km)"
+    }
+
+    if isinstance(metricas, str):
+        metricas = [metricas]
+
+    x_real = pd.to_datetime(metrics_real_df["day"])
+    x_alg = pd.to_datetime(metrics_algo_df["day"])
+
+    # --- 🎨 Colors & styles ---
+    color_real, color_alg = "#800080", "#17BECF"  # Velvet + Teal
+
+    figs = []
+    # --- 4. Go in pairs of metrics ---
+    for i in range(0, len(metricas), 2):
+        pair = metricas[i:i+2]
+        fig = make_subplots(rows=1, cols=len(pair),
+                            subplot_titles=[labels.get(m, m) for m in pair])
+
+        for j, metrica in enumerate(pair, start=1):
+            label = labels.get(metrica, metrica)
+
+            # Serie real
+            fig.add_trace(go.Scatter(
+                x=x_real, y=metrics_real_df[metrica],
+                mode="lines+markers",
+                name=f"{label} (Real)",
+                line=dict(color=color_real, dash="solid"),
+                marker=dict(symbol="circle", size=8, color=color_real),
+                legendgroup=f"{metrica}_real",  # unique group per metric
+                showlegend=True
+            ), row=1, col=j)
+
+            # Serie algoritmo
+            fig.add_trace(go.Scatter(
+                x=x_alg, y=metrics_algo_df[metrica],
+                mode="lines+markers",
+                name=f"{label} (Algoritmo)",
+                line=dict(color=color_alg, dash="dash"),
+                marker=dict(symbol="x", size=8, color=color_alg),
+                legendgroup=f"{metrica}_alg",
+                showlegend=True
+            ), row=1, col=j)
+
+            fig.update_xaxes(title="Día", row=1, col=j)
+            fig.update_yaxes(title=label, row=1, col=j)
+
+        # --- 5. Layout for this figure ---
+        fig.update_layout(
+            height=500,
+            width=1000,
+            title=f"Métricas en {get_city_name_from_code(city)} ({fechas[0]} a {fechas[1]})",
+            margin=dict(t=100, b=100),
+            legend=dict(
+                orientation="h",
+                yanchor="top", y=-0.25,  # move legend below plot
+                xanchor="center", x=0.5
+            )
+        )
+
+        fig.show()
+        figs.append(fig)
+
+    return figs
