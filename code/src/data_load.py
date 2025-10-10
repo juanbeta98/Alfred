@@ -10,6 +10,8 @@ import logging
 from .filtering import filter_valid_services
 from .preprocessing import generate_labors_raw_df
 from .utils import codificacion_ciudades
+from .config import *
+from .experimentation_config import instance_map
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +107,7 @@ def load_tables(
         if "city" in labors_raw_df.columns:
             labors_raw_df["city"] = labors_raw_df["city"].astype(str)
 
-    labors_raw_df = _order_labor_df(labors_raw_df, assignment_type='historic')
+    # labors_raw_df = _order_labor_df(labors_raw_df, assignment_type='historic')
     
     # Directorio
     if read_directorio and directorio_fp.exists():
@@ -186,7 +188,7 @@ def load_artificial_instance(data_path, instance, labors_raw_df, tz: str = "Amer
         Artificial instance dataframe with dtypes aligned to `labors_raw_df`.
     """
     # Load CSV
-    labors_art_df = pd.read_csv(f"{data_path}/data_clean/artif_col_inst/{instance}/labors_{instance}_df.csv")
+    labors_art_df = pd.read_csv(f"{data_path}/instances/artif_inst/{instance}/labors_{instance}_df.csv")
 
     # Align dtypes with reference dataframe
     for col in labors_raw_df.columns:
@@ -226,9 +228,84 @@ def load_artificial_instance(data_path, instance, labors_raw_df, tz: str = "Amer
     return labors_art_df
 
 
+def load_instance(
+    data_path: str, 
+    instance: str, 
+    labors_raw_df: pd.DataFrame, 
+    tz: str = "America/Bogota", 
+    online_type:str = ''):
+    """
+    Load the artificial instance from CSV and align its dtypes with a reference dataframe.
+
+    Parameters
+    ----------
+    data_path : str
+        Path to the folder containing the CSV (expects `data_clean/labors_art_df.csv`).
+    instance : str
+        Name of the artificial instance folder.
+    labors_raw_df : pd.DataFrame
+        Reference dataframe with correct dtypes.
+    tz : str, optional
+        Target timezone for datetime columns. Default = "America/Bogota".
+
+    Returns
+    -------
+    labors_art_df : pd.DataFrame
+        Artificial instance dataframe with dtypes aligned to `labors_raw_df`.
+    """
+    # Load CSV
+    labors_art_df = pd.read_csv(f"{data_path}/instances/{instance_map[instance]}_inst/{instance}/labors_{instance}{online_type}_df.csv")
+
+    # Align dtypes with reference dataframe
+    for col in labors_raw_df.columns:
+        if col in labors_art_df.columns:
+            if col == "city":
+                # Force string representation
+                labors_art_df[col] = labors_art_df[col].astype(str)
+
+            else:
+                try:
+                    labors_art_df[col] = labors_art_df[col].astype(labors_raw_df[col].dtype)
+
+                except Exception:
+                    # If conversion fails, try datetime
+                    if np.issubdtype(labors_raw_df[col].dtype, np.datetime64):
+                        labors_art_df[col] = pd.to_datetime(labors_art_df[col], errors="coerce", utc=True)
+                    # otherwise leave as is
+
+    # Force timezone normalization for known datetime columns
+    datetime_cols = [
+        "labor_created_at",
+        "labor_start_date",
+        "labor_end_date",
+        "created_at",
+        "schedule_date",
+        "actual_start",
+        "actual_end",
+        "historic_start", 
+        'historic_end'
+    ]
+
+    for col in datetime_cols:
+        if col in labors_art_df.columns:
+            labors_art_df[col] = (
+                pd.to_datetime(labors_art_df[col], errors="coerce", utc=True)
+                  .dt.tz_convert(tz)
+            )
+
+    return labors_art_df
+
+
+def load_online_instance(data_path, instance, labors_raw_df):
+    labors_real_df = load_instance(data_path, instance, labors_raw_df)
+    labors_static_df = load_instance(data_path, instance, labors_raw_df, online_type='_static')
+    labors_dynamic_df = load_instance(data_path, instance, labors_raw_df, online_type='_dynamic')
+
+    return labors_real_df, labors_static_df, labors_dynamic_df
+
 def load_distances(data_path, distance_type, instance):
     # Distancias
-    with open(f'{data_path}/data_clean/artif_col_inst/{instance}/{distance_type}_dist_dict.pkl', "rb") as f:
+    with open(f'{data_path}/instances/{instance_map[instance]}_inst/dist/{distance_type}_dist_dict.pkl', "rb") as f:
         dist_dict = pickle.load(f)
     
     return dist_dict
@@ -237,10 +314,10 @@ def load_distances(data_path, distance_type, instance):
 def _order_labor_df(labors_df:pd.DataFrame, 
                    assignment_type:str = 'historic'):
     base_cols = [   'service_id', 'labor_id', 'labor_type', 'labor_name', 'labor_category', 
-        'schedule_date', 'shop']
+        'schedule_date', 'created_at', 'shop']
     historic_cols = ['alfred','labor_start_date', 'labor_end_date']
-    reconstructed_cols = ['historic_driver', 'historic_start', 'historic_end']
-    solution_cols = ['assigned_driver', 'actual_start', 'actual_end']
+    reconstructed_cols = ['historic_driver', 'historic_start', 'historic_end', 'dist_km']
+    solution_cols = ['assigned_driver', 'actual_start', 'actual_end', 'dist_km']
     address_cols = ['address_id', 'address_point', 'address_name', 
                     'start_address_id', 'start_address_point',
                     'end_address_id', 'end_address_point',

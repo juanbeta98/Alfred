@@ -148,3 +148,52 @@ def filter_labores(df: pd.DataFrame, hour_threshold: int = 7) -> pd.DataFrame:
         (df_filtered['map_end_point'] != 'POINT (0 0)')
     ].copy()
     return df_filtered
+
+
+def flexible_filter(df: pd.DataFrame, **filters) -> pd.DataFrame:
+    """
+    Filters a DataFrame based on dynamic keyword arguments.
+    
+    Parameters
+    ----------
+    df : pd.DataFrame
+        The DataFrame to filter.
+    **filters : dict
+        Column-value pairs to filter on.
+        - If value is callable, it will be applied as a function to the column.
+        - If value is a list/tuple/set, will filter using .isin().
+        - If value == "notna", keeps only non-null rows.
+        - If value == "na", keeps only null rows.
+        - If value is a date string ('YYYY-MM-DD') and the column is datetime-like,
+          filters for all rows within that date.
+        - Otherwise, equality will be used.
+    """
+    mask = pd.Series(True, index=df.index)
+
+    for col, val in filters.items():
+        series = df[col]
+
+        if callable(val):
+            mask &= val(series)
+
+        elif isinstance(val, (list, tuple, set)):
+            mask &= series.isin(val)
+
+        elif isinstance(val, str) and val.lower() == "notna":
+            mask &= series.notna()
+
+        elif isinstance(val, str) and val.lower() == "na":
+            mask &= series.isna()
+
+        # Handle date strings like '2026-01-11' for datetime columns
+        elif isinstance(val, str) and series.dtype.kind == "M":
+            try:
+                date = pd.to_datetime(val).date()
+                mask &= series.dt.date == date
+            except Exception:
+                mask &= series == val  # fallback if not a valid date string
+
+        else:
+            mask &= series == val
+
+    return df[mask]

@@ -168,7 +168,7 @@ def build_services_map_df(df):
             else:
                 if r['labor_category'] == 'VEHICLE_TRANSPORTATION':
                     if i == 0:
-                        sp = r['address_point']
+                        sp = r['start_address_point']
                         ep = grp.iloc[i+1]['address_point'] if i < n-1 else r['address_point']
                     else:
                         sp = grp.iloc[i-1]['address_point']
@@ -184,40 +184,7 @@ def build_services_map_df(df):
     return pd.DataFrame(rows)
 
 
-def _build_services_map_df(df):
-    """
-    Crea el mapa de puntos de inicio y fin por labor en cada servicio.
-
-    Parámetros:
-        df (pd.DataFrame): Datos filtrados y ordenados.
-
-    Retorna:
-        pd.DataFrame: Tabla con columnas ['service_id','labor_id','map_start_point','map_end_point'].
-    """
-    rows = []
-    for svc, grp in df.groupby('service_id', sort=False):
-        n = len(grp)
-        idxs = grp.index.tolist()
-        for i, idx in enumerate(idxs):
-            r = grp.loc[idx]
-            if n == 1:
-                sp, ep = r['start_address_point'], r['end_address_point']
-            else:
-                if r['labor_category'] == 'VEHICLE_TRANSPORTATION':
-                    sp = r['start_address_point']
-                    ep = grp.iloc[i+1]['end_address_point'] if i < n-1 else r['end_address_point']
-                else:
-                    sp = ep = r['address_point']
-            rows.append({
-                'service_id': svc,
-                'labor_id': r['labor_id'],
-                'map_start_point': sp,
-                'map_end_point': ep
-            })
-    return pd.DataFrame(rows)
-
-
-def process_group(grp, dist_method, dist_dict):
+def process_group(grp, dist_method, dist_dict, **kwargs):
     """
     Filtra y ordena las labores de un grupo (servicio) siguiendo la lógica de transporte.
 
@@ -246,7 +213,11 @@ def process_group(grp, dist_method, dist_dict):
     A_rem = [i for i in A_idx if i != firstA]
 
     start_pt = grp['start_address_point'].iloc[0]
-    dist_map = {i: distance(start_pt, grp.at[i, 'address_point'], method=dist_method, dist_dict=dist_dict) for i in B_idx}
+    dist_map = {i: distance(start_pt, 
+                            grp.at[i, 'address_point'], 
+                            method=dist_method, 
+                            dist_dict=dist_dict,
+                            **kwargs) for i in B_idx}
     B_sorted = sorted(B_idx, key=lambda i: dist_map[i])[:len(A_idx)-1]
 
     A_rem_sorted = sorted(A_rem, key=lambda i: grp.at[i, 'labor_start_date'])
@@ -319,3 +290,4 @@ def compute_labor_duration_stats(df, city_col="city", labor_col="labor_type",
     )
 
     return stats
+

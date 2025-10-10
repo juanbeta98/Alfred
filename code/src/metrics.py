@@ -11,6 +11,7 @@ from typing import Tuple, Dict
 from .data_load import _order_labor_df
 from .algorithms import init_drivers
 from .distance_utils import distance
+from .experimentation_config import instance_map
 
 
 def collect_vt_metrics_range(
@@ -110,7 +111,8 @@ def collect_vt_metrics_range(
             "num_drivers": m["num_drivers"],
             "labores_por_conductor": round(m["labores_por_conductor"], 3),
             "utilizacion_promedio_%": round(util_prom, 1),
-            'tiempo_extra': round(m['tiempo_extra'],1),
+            'labor_extra_time': round(m['labor_extra_time'],1),
+            'driver_extra_time': round(m['driver_extra_time'],1),
             'total_distance':m['total_distance_km']
         })
 
@@ -124,46 +126,138 @@ def collect_vt_metrics_range(
     # --- Conversión de columna de fechas ---
     x = pd.to_datetime(metrics_df["day"])
 
-    # ==============================
-    # Gráfico 1: Labores por conductor + Utilización promedio (%)
-    # ==============================
-    # fig_metrics = go.Figure()
-    # fig_metrics.add_trace(go.Scatter(
-    #     x=x, y=metrics_df["labores_por_conductor"],
-    #     mode="lines+markers", name="Labores por conductor"
-    # ))
-    # fig_metrics.add_trace(go.Scatter(
-    #     x=x, y=metrics_df["utilizacion_promedio_%"],
-    #     mode="lines+markers", name="Utilización promedio (%)",
-    #     yaxis="y2"
-    # ))
-    # fig_metrics.update_layout(
-    #     title=f"Métricas diarias — {start_date} a {end_date}" + (" (sin fines de semana)" if skip_weekends else ""),
-    #     xaxis_title="Día",
-    #     yaxis=dict(title="Labores por conductor"),
-    #     yaxis2=dict(title="Utilización promedio (%)", overlaying="y", side="right", range=[0, 100]),
-    #     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-    # )
-
-    # ==============================
-    # Gráfico 2: N° Conductores y N° Labores VT
-    # ==============================
-    # fig_counts = go.Figure()
-    # fig_counts.add_trace(go.Bar(
-    #     x=x, y=metrics_df["num_drivers"], name="N° Conductores"
-    # ))
-    # fig_counts.add_trace(go.Bar(
-    #     x=x, y=metrics_df["vt_count"], name="N° Labores VT"
-    # ))
-    # fig_counts.update_layout(
-    #     title=f"Conductores y Labores por día — {start_date} a {end_date}",
-    #     xaxis_title="Día",
-    #     yaxis_title="Conteo",
-    #     barmode="group",
-    #     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-    # )
-
     return metrics_df
+
+
+def vt_metrics(
+    df: pd.DataFrame,
+    day_str: str,
+    workday_hours: float = 8.0,
+    dist_dict: dict | None = None,
+    assignment_type: str = "algorithm"
+):
+    """
+    Calcula métricas de utilización de conductores, distancia total recorrida
+    y tiempo extra (labor vs. conductor) en labores VEHICLE_TRANSPORTATION
+    para un día específico.
+
+    Retorna
+    -------
+    dict
+        Diccionario con:
+            - vt_count : int
+            - alfred_col : str|None
+            - alfred_ids : list
+            - num_drivers : int
+            - labores_por_conductor : float
+            - total_distance_km : float
+            - resumen_df : pd.DataFrame
+            - trabajo_por_conductor_df : pd.DataFrame
+            - filtered_df : pd.DataFrame
+    """
+    df = df.copy()
+
+    # Selección dinámica de columnas de tiempo
+    if assignment_type == "historic":
+        start_col, end_col, alfred_col = "historic_start", "historic_end", "historic_driver"
+    elif assignment_type == "algorithm":
+        start_col, end_col, alfred_col = "actual_start", "actual_end", "assigned_driver"
+    else:
+        raise ValueError("assignment_type debe ser 'historic' o 'algorithm'")
+
+    # Validar columnas mínimas
+    _validate_columns(df, [start_col, end_col, "labor_category"])
+
+    # Parsear fechas con preservación de zona horaria
+    for col in [start_col, end_col]:
+        if not pd.api.types.is_datetime64_any_dtype(df[col]):
+            df[col] = pd.to_datetime(df[col], errors="coerce", utc=True).dt.tz_convert("America/Bogota")
+        elif df[col].dt.tz is None:
+            df[col] = df[col].dt.tz_localize("America/Bogota")
+
+    # Renombrar a columnas estándar internas
+    df = df.rename(columns={start_col: "start_time", end_col: "end_time"})
+
+    # Filtrar por día
+    df_day = _filter_day(df, day_str, start_col="start_time", end_col="end_time")
+
+    # Conteo de labores VT
+    vt_mask = df_day["labor_category"].eq("VEHICLE_TRANSPORTATION")
+    df_vt = df_day.loc[vt_mask].copy()
+    vt_count = int(len(df_vt))
+
+    if alfred_col:
+        alfred_ids = sorted(df_day[alfred_col].dropna().unique().tolist())
+        num_drivers = len(alfred_ids)
+    else:
+        alfred_ids, num_drivers = [], 0
+
+    # Métrica: labores promedio por conductor
+    labores_por_conductor = (vt_count / num_drivers) if num_drivers > 0 else float("nan")
+
+    # Tabla de carga laboral por conductor
+    trabajo_por_conductor_df = pd.DataFrame()
+    if alfred_col and vt_count > 0:
+        trabajo_por_conductor_df = _compute_driver_workload(df_vt, alfred_col, workday_hours)
+
+    # Métrica: utilización promedio
+    util_prom = float(trabajo_por_conductor_df["utilizacion_%"].mean()) if not trabajo_por_conductor_df.empty else 0.0
+
+    # Métrica: distancia total
+    total_distance_km = _compute_total_distance(df_vt, dist_dict) if (dist_dict and vt_count > 0) else 0.0
+
+    # --- Métricas de tiempo extra ---
+    if not trabajo_por_conductor_df.empty:
+        total_labor_ot   = float(trabajo_por_conductor_df["labor_extra_time_min"].sum())
+        total_driver_ot  = float(trabajo_por_conductor_df["driver_extra_time_min"].sum())
+        # total_early_ot   = float(trabajo_por_conductor_df["early_overtime_min"].sum())
+        # total_late_ot    = float(trabajo_por_conductor_df["late_overtime_min"].sum())
+    else:
+        total_labor_ot = total_driver_ot = total_early_ot = total_late_ot = 0.0
+
+    # Tabla resumen
+    resumen_df = pd.DataFrame({
+        "Métrica": [
+            "Labores VEHICLE_TRANSPORTATION (día filtrado)",
+            "Conductores únicos (alfred)",
+            "Labores por conductor",
+            "Utilización promedio conductores",
+            "Distancia total recorrida (km)",
+            "Tiempo extra total por labor (min)",
+            "Tiempo extra total por labor (horas)",
+            "Tiempo extra total por conductor (min)",
+            "Tiempo extra total por conductor (horas)",
+            # "Tiempo extra temprano (min)",
+            # "Tiempo extra tarde (min)"
+        ],
+        "Valor": [
+            vt_count,
+            num_drivers,
+            round(labores_por_conductor, 3),
+            f"{util_prom:.1f}%",
+            round(total_distance_km, 2),
+            round(total_labor_ot, 1),
+            round(total_labor_ot / 60.0, 2),
+            round(total_driver_ot, 1),
+            round(total_driver_ot / 60.0, 2),
+            # round(total_early_ot, 1),
+            # round(total_late_ot, 1)
+        ]
+    })
+
+    return {
+        "vt_count": vt_count,
+        "alfred_col": alfred_col,
+        "alfred_ids": alfred_ids,
+        "num_drivers": num_drivers,
+        "labores_por_conductor": labores_por_conductor,
+        "total_distance_km": total_distance_km,
+        "labor_extra_time": total_labor_ot,
+        "driver_extra_time": total_driver_ot,
+        "resumen_df": resumen_df,
+        "trabajo_por_conductor_df": trabajo_por_conductor_df,
+        "filtered_df": df_day
+    }
 
 
 def _validate_columns(df: pd.DataFrame, required: list[str]) -> None:
@@ -173,9 +267,12 @@ def _validate_columns(df: pd.DataFrame, required: list[str]) -> None:
         raise KeyError(f"Faltan columnas requeridas: {missing}")
 
 
-def _filter_day(df: pd.DataFrame, day_str: str,
-                start_col: str = "start_time",
-                end_col: str = "end_time") -> pd.DataFrame:
+def _filter_day(
+    df: pd.DataFrame, 
+    day_str: str,
+    start_col: str = "start_time",
+    end_col: str = "end_time"
+) -> pd.DataFrame:
     """
     Filtra filas cuya ventana temporal cae dentro de [día, día+1).
 
@@ -208,67 +305,99 @@ def _filter_day(df: pd.DataFrame, day_str: str,
     return df.loc[mask].copy()
 
 
-def _detect_driver_column(df: pd.DataFrame) -> str | None:
-    """Detecta el nombre de columna que identifica al conductor."""
-    colmap = {c.lower(): c for c in df.columns}
-    if "alfred" in colmap:
-        return colmap["alfred"]
+def _compute_driver_workload(
+    df_vt: pd.DataFrame,
+    alfred_col: str,
+    workday_hours: float,
+    work_start="09:00",
+    work_end="17:00"
+) -> pd.DataFrame:
+    """Calcula carga de trabajo, utilización y horas extra por conductor.
 
-    for alias in ["alfred's", "assigned_driver", "driver", "conductor", "alfred_id"]:
-        if alias in colmap:
-            return colmap[alias]
-    return None
-
-
-def _compute_driver_workload(df_vt: pd.DataFrame, alfred_col: str, workday_hours: float) -> pd.DataFrame:
-    """Calcula carga de trabajo, utilización y horas extra (antes 09:00 y después 17:00) por conductor."""
+    Incluye:
+      - Tiempo extra por labor (suma de tiempos fuera de jornada en cada labor).
+      - Tiempo extra por conductor (ventana desde primer hasta último servicio).
+    """
     df_vt = df_vt.copy()
     df_vt["duration_min"] = (df_vt["end_time"] - df_vt["start_time"]).dt.total_seconds() / 60
     df_vt = df_vt.dropna(subset=["duration_min"])
     df_vt = df_vt[df_vt["duration_min"] >= 0]
 
-    # Overtime detallado
-    overtime = df_vt.apply(_compute_overtime_minutes, axis=1, result_type="expand")
+    # --- 1) Overtime detallado por labor ---
+    overtime = df_vt.apply(_compute_overtime_per_labor, axis=1, result_type="expand")
     overtime.columns = ["early_min", "late_min"]
     df_vt = pd.concat([df_vt, overtime], axis=1)
 
     agg = (
         df_vt.dropna(subset=[alfred_col])
              .groupby(alfred_col)
-             .agg(total_min=("duration_min", "sum"),
-                  early_overtime_min=("early_min", "sum"),
-                  late_overtime_min=("late_min", "sum"))
+             .agg(
+                 total_min=("duration_min", "sum"),
+                 early_overtime_min=("early_min", "sum"),
+                 late_overtime_min=("late_min", "sum"),
+                 first_start=("start_time", "min"),
+                 last_end=("end_time", "max")
+             )
              .reset_index()
     )
 
     if agg.empty:
         return pd.DataFrame(columns=[
             alfred_col, "total_min", "total_horas", "utilizacion_%",
-            "tiempo_extra_min", "tiempo_extra_horas",
-            "early_overtime_min", "late_overtime_min"
+            "labor_extra_time_min", "labor_extra_time_horas",
+            "early_overtime_min", "late_overtime_min",
+            "driver_extra_time_min", "driver_extra_time_horas"
         ])
 
-    jornada_min = workday_hours * 60.0
-    agg["total_horas"]        = agg["total_min"] / 60.0
-    agg["utilizacion_%"]      = agg["total_min"] / jornada_min * 100.0
-    agg["tiempo_extra_min"]   = agg["early_overtime_min"] + agg["late_overtime_min"]
-    agg["tiempo_extra_horas"] = agg["tiempo_extra_min"] / 60.0
+    # --- 2) Overtime por ventana completa de cada conductor ---
+    driver_extra = []
+    for _, row in agg.iterrows():
+        start, end = row["first_start"], row["last_end"]
 
-    # Redondeo
+        if pd.isna(start) or pd.isna(end) or end <= start:
+            driver_extra.append((0.0, 0.0))
+            continue
+
+        # Definir jornada laboral del mismo día
+        day = start.normalize()
+        tz  = start.tz or "America/Bogota"
+        work_start_dt = pd.to_datetime(f"{day.date()} {work_start}").tz_localize(tz)
+        work_end_dt   = pd.to_datetime(f"{day.date()} {work_end}").tz_localize(tz)
+
+        early = max(0, (work_start_dt - start).total_seconds() / 60)
+        late  = max(0, (end - work_end_dt).total_seconds() / 60)
+        driver_extra.append((early + late, (early + late) / 60.0))
+
+    driver_extra = pd.DataFrame(driver_extra, columns=["driver_extra_time_min", "driver_extra_time_horas"])
+    agg = pd.concat([agg, driver_extra], axis=1)
+
+    # --- 3) Métricas derivadas ---
+    jornada_min = workday_hours * 60.0
+    agg["total_horas"]            = agg["total_min"] / 60.0
+    agg["utilizacion_%"]          = agg["total_min"] / jornada_min * 100.0
+    agg["labor_extra_time_min"]   = agg["early_overtime_min"] + agg["late_overtime_min"]
+    agg["labor_extra_time_horas"] = agg["labor_extra_time_min"] / 60.0
+
+    # --- 4) Redondeo ---
     agg = agg.round({
         "total_min": 1,
         "total_horas": 2,
         "utilizacion_%": 1,
-        "tiempo_extra_min": 1,
-        "tiempo_extra_horas": 2,
+        "labor_extra_time_min": 1,
+        "labor_extra_time_horas": 2,
         "early_overtime_min": 1,
-        "late_overtime_min": 1
+        "late_overtime_min": 1,
+        "driver_extra_time_min": 1,
+        "driver_extra_time_horas": 2
     })
+
+    # Limpiar columnas intermedias
+    agg = agg.drop(columns=["first_start", "last_end"])
 
     return agg.sort_values("total_min", ascending=False).reset_index(drop=True)
 
 
-def _compute_overtime_minutes(row, work_start="09:00", work_end="17:00") -> tuple[float, float]:
+def _compute_overtime_per_labor(row, work_start="09:00", work_end="17:00") -> tuple[float, float]:
     """
     Calcula minutos de tiempo extra antes y después de la jornada para una labor.
     """
@@ -322,136 +451,6 @@ def _compute_total_distance(df_vt: pd.DataFrame, dist_dict: dict) -> float:
         total_distance += dist_dict.get(key, 0.0)
 
     return float(total_distance)
-
-
-# ==========================
-# Función principal
-# ==========================
-
-def vt_metrics(
-    df: pd.DataFrame,
-    day_str: str,
-    workday_hours: float = 8.0,
-    dist_dict: dict | None = None,
-    assignment_type: str = "algorithm"
-):
-    """
-    Calcula métricas de utilización de conductores, distancia total recorrida
-    y tiempo extra (antes de las 09:00 y después de las 17:00) en labores
-    VEHICLE_TRANSPORTATION para un día específico.
-
-    Retorna
-    -------
-    dict
-        Diccionario con:
-            - vt_count : int
-            - alfred_col : str|None
-            - alfred_ids : list
-            - num_drivers : int
-            - labores_por_conductor : float
-            - total_distance_km : float
-            - resumen_df : pd.DataFrame
-            - trabajo_por_conductor_df : pd.DataFrame
-            - filtered_df : pd.DataFrame
-    """
-    df = df.copy()
-
-    # Selección dinámica de columnas de tiempo
-    if assignment_type == "historic":
-        start_col, end_col, alfred_col = "historic_start", "historic_end", 'historic_driver'
-    elif assignment_type == "algorithm":
-        start_col, end_col, alfred_col = "actual_start", "actual_end", 'assigned_driver'
-    else:
-        raise ValueError("assignment_type debe ser 'historic' o 'algorithm'")
-
-    # Validar columnas mínimas
-    _validate_columns(df, [start_col, end_col, "labor_category"])
-
-    # Parsear fechas con preservación de zona horaria
-    for col in [start_col, end_col]:
-        if not pd.api.types.is_datetime64_any_dtype(df[col]):
-            df[col] = pd.to_datetime(df[col], errors="coerce", utc=True).dt.tz_convert("America/Bogota")
-        elif df[col].dt.tz is None:
-            df[col] = df[col].dt.tz_localize("America/Bogota")
-
-
-    # Renombrar a columnas estándar internas
-    df = df.rename(columns={start_col: "start_time", end_col: "end_time"})
-
-    # Filtrar por día
-    df_day = _filter_day(df, day_str, start_col='start_time', end_col='end_time')
-
-    # Conteo de labores VT
-    vt_mask = df_day["labor_category"].eq("VEHICLE_TRANSPORTATION")
-    df_vt = df_day.loc[vt_mask].copy()
-    vt_count = int(len(df_vt))
-
-    if alfred_col:
-        alfred_ids = sorted(df_day[alfred_col].dropna().unique().tolist())
-        num_drivers = len(alfred_ids)
-    else:
-        alfred_ids, num_drivers = [], 0
-
-    # Métrica: labores promedio por conductor
-    labores_por_conductor = (vt_count / num_drivers) if num_drivers > 0 else float("nan")
-
-    # Tabla de carga laboral por conductor
-    trabajo_por_conductor_df = pd.DataFrame()
-    if alfred_col and vt_count > 0:
-        trabajo_por_conductor_df = _compute_driver_workload(df_vt, alfred_col, workday_hours)
-
-    # Métrica: utilización promedio
-    util_prom = float(trabajo_por_conductor_df["utilizacion_%"].mean()) if not trabajo_por_conductor_df.empty else 0.0
-
-    # Métrica: distancia total
-    total_distance_km = _compute_total_distance(df_vt, dist_dict) if (dist_dict and vt_count > 0) else 0.0
-
-    # Métricas de tiempo extra global
-    if not trabajo_por_conductor_df.empty:
-        total_early_ot = float(trabajo_por_conductor_df["early_overtime_min"].sum())
-        total_late_ot  = float(trabajo_por_conductor_df["late_overtime_min"].sum())
-        total_ot       = float(trabajo_por_conductor_df["tiempo_extra_min"].sum())
-    else:
-        total_early_ot = total_late_ot = total_ot = 0.0
-
-    # Tabla resumen
-    resumen_df = pd.DataFrame({
-        "Métrica": [
-            "Labores VEHICLE_TRANSPORTATION (día filtrado)",
-            "Conductores únicos (alfred)",
-            "Labores por conductor",
-            "Utilización promedio conductores",
-            "Distancia total recorrida (km)",
-            "Tiempo extra total (min)",
-            "Tiempo extra total (horas)",
-            "Tiempo extra temprano (min)",
-            "Tiempo extra tarde (min)"
-        ],
-        "Valor": [
-            vt_count,
-            num_drivers,
-            round(labores_por_conductor, 3),
-            f"{util_prom:.1f}%",
-            round(total_distance_km, 2),
-            round(total_ot, 1),
-            round(total_ot/60.0, 2),
-            round(total_early_ot, 1),
-            round(total_late_ot, 1)
-        ]
-    })
-
-    return {
-        "vt_count": vt_count,
-        "alfred_col": alfred_col,
-        "alfred_ids": alfred_ids,
-        "num_drivers": num_drivers,
-        "labores_por_conductor": labores_por_conductor,
-        "total_distance_km": total_distance_km,
-        'tiempo_extra': total_ot,
-        "resumen_df": resumen_df,
-        "trabajo_por_conductor_df": trabajo_por_conductor_df,
-        "filtered_df": df_day
-    }
 
 
 def show_day_report_dayonly(
@@ -578,6 +577,80 @@ def show_day_report_dayonly(
         return summary, (df_plot, driver_col)
 
 
+def get_day_plotting_df(
+    df_full: pd.DataFrame,
+    *,
+    day_str: str,
+    workday_hours: float = 8.0,
+    city_code: str | int | None = "149",
+    only_vt: bool = False,
+    dist_dict: dict | None = None,
+    assignment_type: str = "real"
+) -> tuple[pd.DataFrame, str]:
+    """
+    Prepara un DataFrame listo para graficar (Gantt u otros) 
+    con las labores de un día específico y los conductores presentes.
+
+    Parameters
+    ----------
+    df_full : pd.DataFrame
+        DataFrame con todas las labores (de varias ciudades/días).
+    day_str : str
+        Fecha en formato 'YYYY-MM-DD'.
+    workday_hours : float, default=8.0
+        Horas de jornada laboral.
+    city_code : str | int | None, default="149"
+        Código de ciudad para filtrar. Si None, no se filtra por ciudad.
+    only_vt : bool, default=False
+        Si True, solo devuelve labores de tipo "VEHICLE_TRANSPORTATION".
+    dist_dict : dict | None, optional
+        Diccionario de distancias para cálculos de métricas.
+    assignment_type : str, default="real"
+        Tipo de asignación: "real" o "algorithm".
+
+    Returns
+    -------
+    df_plot : pd.DataFrame
+        DataFrame filtrado listo para graficar.
+    driver_col : str
+        Nombre de la columna que identifica a los conductores.
+    """
+    # --- Copiar DataFrame y filtrar por ciudad si aplica ---
+    dfx = df_full.copy()
+    if city_code is not None and "city" in dfx.columns:
+        dfx["city"] = dfx["city"].astype(str)
+        city_code = str(city_code)
+        dfx = dfx[dfx["city"] == city_code].copy()
+
+    # --- Obtener métricas del día ---
+    m_day = vt_metrics(
+        dfx,
+        day_str=day_str,
+        workday_hours=workday_hours,
+        dist_dict=dist_dict,
+        assignment_type=assignment_type
+    )
+
+    df_day = m_day["filtered_df"].copy()
+    driver_col = m_day["alfred_col"]
+    if driver_col is None:
+        raise KeyError("No se encontró columna de conductor.")
+
+    # --- Conductores presentes ---
+    drivers_present = (
+        df_day[driver_col].dropna().unique().tolist()
+        if not df_day.empty else []
+    )
+
+    # --- Preparar DataFrame para graficar ---
+    df_plot = df_day.copy()
+    if only_vt and "labor_category" in df_plot.columns:
+        df_plot = df_plot[df_plot["labor_category"] == "VEHICLE_TRANSPORTATION"]
+    df_plot = df_plot[df_plot[driver_col].isin(drivers_present)]
+
+    return df_plot, driver_col
+
+
 def compute_indicators(
     df_cleaned: pd.DataFrame,
     df_moves: pd.DataFrame,
@@ -685,11 +758,12 @@ def compute_indicators(
     return indicators, ind_df
 
 
-def collect_results_to_df(data_path, 
-                          instance, 
-                          fecha_list,
-                          assignment_type = 'algorithm',
-                          tz: str = "America/Bogota"):
+def collect_hist_baseline_dfs(
+    data_path, 
+    instance, 
+    fecha_list,
+    tz: str = "America/Bogota"
+) -> Tuple:
     """
     Carga resultados desde pickles y devuelve dos DataFrames consolidados:
         - results_df: contiene df_cleaned (labores finales)
@@ -714,10 +788,7 @@ def collect_results_to_df(data_path,
     all_moves   = []
 
     for fecha in fecha_list:
-        if assignment_type == 'algorithm':
-            upload_path = f"{data_path}/resultados/artif_col_inst/{instance}/res_{fecha}.pkl"
-        elif assignment_type == 'historic':
-            upload_path = f"{data_path}/resultados/artif_col_inst/{instance}/res_hist_{fecha}.pkl"
+        upload_path = f"{data_path}/alfred_baseline/{instance}/res_hist_{fecha}.pkl"
         
         with open(upload_path, "rb") as f:
             res = pickle.load(f)  # dict: {city: (df_cleaned, df_moves, n_drivers)}
@@ -768,7 +839,97 @@ def collect_results_to_df(data_path,
                       .dt.tz_convert(tz)
                 )
     
-    results_df = _order_labor_df(results_df, assignment_type=assignment_type)
+    # results_df = _order_labor_df(results_df, assignment_type=assignment_type)
+
+    return results_df, moves_df
+
+
+def collect_results_to_df(
+    data_path, 
+    instance, 
+    fecha_list,
+    assignment_type = 'algorithm',
+    tz: str = "America/Bogota"
+) -> Tuple:
+    """
+    Carga resultados desde pickles y devuelve dos DataFrames consolidados:
+        - results_df: contiene df_cleaned (labores finales)
+        - moves_df: contiene df_moves (movimientos simulados)
+
+    Params
+    ------
+        data_path : str
+            Path base de los datos
+        instance : str
+            Nombre de la instancia artificial
+        fecha_list : list[str]
+            Lista de fechas en formato YYYY-MM-DD
+        tz : str, opcional
+            Zona horaria de destino para columnas datetime. Default="America/Bogota"
+
+    Returns
+    -------
+        results_df (pd.DataFrame), moves_df (pd.DataFrame)
+    """
+    all_results = []
+    all_moves   = []
+
+    for fecha in fecha_list:
+        if assignment_type == 'algorithm':
+            upload_path = f"{data_path}/resultados/{instance_map[instance]}_inst/{instance}/res_{fecha}.pkl"
+        elif assignment_type == 'historic':
+            upload_path = f"{data_path}/resultados/{instance_map[instance]}_inst/{instance}/res_hist_{fecha}.pkl"
+        
+        with open(upload_path, "rb") as f:
+            res = pickle.load(f)  # dict: {city: (df_cleaned, df_moves, n_drivers)}
+
+        for city, (df_cleaned, df_moves, n_drivers) in res.items():
+            # --- df_cleaned records ---
+            if df_cleaned is not None and not df_cleaned.empty:
+                tmp = df_cleaned.copy()
+                tmp["city"] = city
+                tmp["date"] = fecha
+                tmp["n_drivers"] = n_drivers
+                all_results.append(tmp)
+
+            # --- df_moves records ---
+            if df_moves is not None and not df_moves.empty:
+                tmpm = df_moves.copy()
+                tmpm["city"] = city
+                tmpm["date"] = fecha
+                all_moves.append(tmpm)
+
+    results_df = pd.concat(all_results, ignore_index=True) if all_results else pd.DataFrame()
+    moves_df   = pd.concat(all_moves, ignore_index=True) if all_moves else pd.DataFrame()
+
+    if not results_df.empty:
+        results_df = results_df.sort_values(["city", "date", "service_id", "labor_id"])
+    if not moves_df.empty:
+        moves_df = moves_df.sort_values(["city", "date", "service_id", "labor_id"])
+
+    # Normalize datetime columns to Bogotá tz
+    datetime_cols = [
+        "labor_created_at",
+        "labor_start_date",
+        "labor_end_date",
+        "created_at",
+        "schedule_date",
+        
+    ]
+    if assignment_type == 'algorithm':
+        datetime_cols += ["actual_start", "actual_end"]
+    elif assignment_type == 'historic':
+        datetime_cols += ['historic_start', 'historic_end']
+
+    for df in (results_df, moves_df):
+        for col in datetime_cols:
+            if col in df.columns:
+                df[col] = (
+                    pd.to_datetime(df[col], errors="coerce", utc=True)
+                      .dt.tz_convert(tz)
+                )
+    
+    # results_df = _order_labor_df(results_df, assignment_type=assignment_type)
 
     return results_df, moves_df
 
@@ -850,7 +1011,7 @@ def collect_results_from_dicts(
                       .dt.tz_convert(tz)
                 )
 
-    results_df = _order_labor_df(results_df, assignment_type=assignment_type)
+    # results_df = _order_labor_df(results_df, assignment_type=assignment_type)
 
     return results_df, moves_df
 
@@ -864,7 +1025,7 @@ def compute_metrics_with_moves(
     city: str,
     assignment_type: str,
     skip_weekends: bool = False,
-    distance_method: str = "haversine"
+    dist_method: str = "haversine"
 ) -> pd.DataFrame:
     """
     Compute VT metrics + driver movement distance for a given city and assignment type.
@@ -914,7 +1075,7 @@ def compute_metrics_with_moves(
     df_driver_moves = df_moves_city[df_moves_city["labor_category"] == "DRIVER_MOVE"].copy()
     if "distance_km" not in df_driver_moves.columns:
         df_driver_moves["distance_km"] = df_driver_moves.apply(
-            lambda r: distance(r["start_point"], r["end_point"], method=distance_method, dist_dict=dist_dict),
+            lambda r: distance(r["start_point"], r["end_point"], method=dist_method, dist_dict=dist_dict)[0],
             axis=1
         )
 
@@ -930,3 +1091,4 @@ def compute_metrics_with_moves(
     metrics_df = metrics_df.merge(moves_exp_df, on="day", how="left").fillna(0)
 
     return metrics_df
+

@@ -34,4 +34,6 @@ def get_city_name(city_code: str, cities_df: pd.DataFrame) -> str:
 
 
 def get_city_name_from_code(city_code):
+    if city_code == 'ALL':
+        return 'Global'
     return codificacion_ciudades.get(city_code, 'DESCONOCIDO')

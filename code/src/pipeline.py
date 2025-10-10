@@ -7,6 +7,7 @@ from .metrics import collect_vt_metrics_range, show_day_report_dayonly, compute_
 from .preprocessing import remap_to_base_date, build_services_map_df, process_group # type: ignore
 from .plotting import plot_results # type: ignore
 from .config import *
+from .experimentation_config import max_drivers
 from .algorithms import remove_drivers, compute_avg_times, run_assignment_algorithm, init_drivers # type: ignore
 from .utils import get_city_name_from_code
 
@@ -20,7 +21,10 @@ def run_city_pipeline(  city_code,
                         duraciones_df,
                         assignment_type,
                         alpha=1,
-                        DIST_DICT=None
+                        dist_method='haversine',
+                        DIST_DICT=None,
+                        max_drivers_num=None,
+                        **kwargs
                       ) :
     """
     Ejecuta TODO el flujo para una ciudad y fecha dada.
@@ -51,8 +55,13 @@ def run_city_pipeline(  city_code,
     # 6. Procesar grupos
     cleaned = []
     for _, grp in df_city_remaped.groupby('service_id', sort=False):
-        cleaned.append(process_group(grp, 'harvesine', DIST_DICT))
+        kwargs['city_code'] = city_code
+        cleaned.append(process_group(grp, dist_method=dist_method, 
+                                     dist_dict=DIST_DICT, **kwargs))
 
+    if len(cleaned)==0:
+        return ()
+    
     df_cleaned_template = pd.concat([c for c in cleaned if not c.empty], ignore_index=True)
     df_cleaned_template = df_cleaned_template.merge(
         services_map_df, 
@@ -63,10 +72,10 @@ def run_city_pipeline(  city_code,
     df_cleaned_template = filter_labores(df_cleaned_template, hour_threshold=0)
     # avg_times_map = compute_avg_times(df_dist)
 
-    max_drivers_num = max_drivers.get(city_code, None)
-    if max_drivers_num:
-        max_drivers_num = max_drivers_num[base_day.day - 8]
-        # print(max_drivers_num)
+    #TODO: DEPENDING ON WHICH 
+    # max_drivers_num = max_drivers.get(instance, None)
+    # if max_drivers_num:
+    #     max_drivers_num = max_drivers_num[base_day.day - initial_day]
 
     # 7. Ejecutar el algorithmo de assignación
     df_result, df_moves, n_drivers = run_assignment_algorithm(  df_cleaned_template=df_cleaned_template,
@@ -75,9 +84,11 @@ def run_city_pipeline(  city_code,
                                                                 day_str=start_date, 
                                                                 ciudad=get_city_name_from_code(city_code),
                                                                 dist_dict=DIST_DICT,
+                                                                dist_method=dist_method,
                                                                 assignment_type=assignment_type,
                                                                 alpha=alpha,
-                                                                max_drivers=max_drivers_num
+                                                                max_drivers=max_drivers_num,
+                                                                **kwargs
                                                       )
 
     # 8. Devolver resultados
