@@ -167,7 +167,12 @@ def upload_cities_table(data_path: str, city_codes: list = []) -> pd.DataFrame:
     return filtered_df[["cod_ciudad", "ciudad", "cod_depto", "depto"]].reset_index(drop=True)
 
 
-def load_artificial_instance(data_path, instance, labors_raw_df, tz: str = "America/Bogota"):
+def load_artificial_instance(
+    data_path, 
+    instance, 
+    labors_raw_df, 
+    tz: str = "America/Bogota"
+) -> pd.DataFrame:
     """
     Load the artificial instance from CSV and align its dtypes with a reference dataframe.
 
@@ -303,12 +308,31 @@ def load_online_instance(data_path, instance, labors_raw_df):
 
     return labors_real_df, labors_static_df, labors_dynamic_df
 
-def load_distances(data_path, distance_type, instance):
+
+def load_distances(data_path, distance_type, instance, distance_method='precalced'):
     # Distancias
-    with open(f'{data_path}/instances/{instance_map[instance]}_inst/dist/{distance_type}_dist_dict.pkl', "rb") as f:
-        dist_dict = pickle.load(f)
-    
-    return dist_dict
+    if distance_method=='precalced':
+        with open(f'{data_path}/instances/{instance_map[instance]}_inst/dist/{distance_type}_dist_dict.pkl', "rb") as f:
+            dist_dict = pickle.load(f)
+        return dist_dict
+    else:
+        return {}
+
+
+def load_directorio_hist_df(data_path, instance):
+    directorio_hist_df = pd.read_csv(f'{data_path}/instances/{instance_map[instance]}_inst/{instance}/directorio_hist_df.csv')
+    directorio_hist_df['city'] = directorio_hist_df['city'].astype(str)
+
+    return directorio_hist_df
+
+
+def load_inputs(data_path, instance, **kwargs):
+    directorio_df, labor_raw_df, cities_df, duraciones_df, valid_cities = load_tables(data_path)
+    labors_real_df = load_instance(data_path, instance, labor_raw_df)
+    directorio_hist_df = load_directorio_hist_df(data_path, instance)
+
+    return (directorio_df, labor_raw_df, cities_df, duraciones_df, 
+            valid_cities, labors_real_df, directorio_hist_df)
 
 
 def _order_labor_df(labors_df:pd.DataFrame, 

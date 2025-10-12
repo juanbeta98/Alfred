@@ -44,7 +44,7 @@ def run_assignment_algorithm(
     service_end_times = {}
 
     drivers = init_drivers_wrapper(df_sorted, directorio_df, ciudad, assignment_type=assignment_type, 
-                                   max_drivers=max_drivers)
+                                   max_drivers=max_drivers, **kwargs)
 
     # --- Lógica de asignación principal ---
     for _, row in df_sorted.iterrows():
@@ -249,15 +249,18 @@ def init_drivers_wrapper(
     df_labors: pd.DataFrame, 
     directorio_df: pd.DataFrame, 
     ciudad: str, 
-    assignment_type: str = "algorithm", 
-    max_drivers=None
+    max_drivers=None,
+    driver_init_mode: str = 'historic_directory',
+    **kwargs
 ):
-    if assignment_type == "algorithm":
+    if driver_init_mode == "driver_directory":
         return init_drivers(df_labors, directorio_df, ciudad, ignore_schedule=True, max_drivers=max_drivers)
-    elif assignment_type == "historic":
-        return get_historic_drivers(df_labors)
+    elif driver_init_mode == 'historic_directory':
+        return init_historic_drivers(df_labors, directorio_df)
+    # elif assignment_type == "historic":
+    #     return get_historic_drivers(df_labors)
     else:
-        raise ValueError(f"Unknown assignment mode: {assignment_type}")
+        raise ValueError(f"Unknown driver initialization mode: {driver_init_mode}")
 
 
 def init_drivers(
@@ -340,6 +343,36 @@ def init_drivers(
             'work_start': hora_inicio
         }
     
+    return conductores
+
+
+def init_historic_drivers(
+    df_labors: pd.DataFrame,
+    directorio_hist_df: pd.DataFrame, 
+    # first_date
+) -> dict:
+    first_date = df_labors['schedule_date'].dt.date.min()
+    if pd.isna(first_date):
+        raise ValueError("No se pudo determinar la fecha mínima en 'schedule_date'.")
+    
+    # --- Construcción de conductores ---
+    conductores = {}
+    for driver, df_driver in directorio_hist_df.groupby("alfred"):
+        # Posición inicial: primer punto válido
+        pos_list = df_driver["address_point"].dropna().unique().tolist()
+        if not pos_list:
+            continue  # ignorar conductor sin posición
+        position = pos_list[0]
+
+        # Disponibilidad: medianoche de la fecha mínima
+        hora_inicio = time(0, 0, 0)
+        disponibilidad = datetime.combine(first_date, hora_inicio)
+
+        conductores[driver] = {
+            "position": position,
+            "available": pd.Timestamp(disponibilidad).tz_localize(tz="America/Bogota"),
+            "work_start": hora_inicio,
+        }
     
     return conductores
 
@@ -611,6 +644,7 @@ def build_driver_movements(
     ALFRED_SPEED: float,
     ciudad: str,
     assignment_type: str = 'algorithm',
+    driver_init_mode: str = 'historic_directory',
     dist_dict: dict = None,
     **kwargs
 ) -> pd.DataFrame:
@@ -669,7 +703,14 @@ def build_driver_movements(
     # --- 4. Inicializar posición/hora de inicio de alfreds ---
     driver_pos, driver_end = {}, {}
 
-    if assignment_type == 'algorithm':
+    if driver_init_mode == 'historic_directory':
+        for _, d in directorio_df.iterrows():
+            name = d['alfred']
+            driver_pos[name] = d['address_point']
+            st = datetime.combine(first_day, time(7, 0))
+            driver_end[name] = pd.Timestamp(st, tz=tz)
+    
+    elif driver_init_mode == 'driver_directory':
         df_dir_city = directorio_df[directorio_df['city'] == ciudad]
         for _, d in df_dir_city.iterrows():
             if pd.isna(d['latitud']):
@@ -678,34 +719,34 @@ def build_driver_movements(
             driver_pos[name] = f"POINT ({d['longitud']} {d['latitud']})"
             st = datetime.combine(first_day, datetime.strptime(d['start_time'], '%H:%M:%S').time())
             driver_end[name] = pd.Timestamp(st, tz=tz)
-    else:
-        directorio_hist_df = pd.read_csv(f'{REPO_PATH}/data/data_pre/directorio_hist_df.csv')
-        for drv in df_result[driver_col].dropna().unique():
-            base_row = directorio_hist_df[directorio_hist_df['alfred'] == drv]
+    # else:
+        # directorio_hist_df = pd.read_csv(f'{REPO_PATH}/data/data_pre/directorio_hist_df.csv')
+        # for drv in df_result[driver_col].dropna().unique():
+        #     base_row = directorio_hist_df[directorio_hist_df['alfred'] == drv]
 
-            if not base_row.empty:
-                # Use predefined base location
-                driver_pos[drv] = base_row.iloc[0]['address_point']
-                # Start time always at 7:00
-                st = datetime.combine(
-                    pd.to_datetime(df_result[start_col].min()).date(),
-                    time(7, 0)
-                )
-                driver_end[drv] = pd.Timestamp(st, tz="America/Bogota")
-            else:
-                # Fallback: use first assigned labor
-                first_row = (
-                    df_result[df_result[driver_col] == drv]
-                    .dropna(subset=[start_col])
-                    .sort_values(start_col)
-                    .iloc[0]
-                )
-                driver_pos[drv] = first_row['map_start_point']
-                st = datetime.combine(
-                    pd.to_datetime(first_row[start_col]).date(),
-                    time(7, 0)
-                )
-                driver_end[drv] = pd.Timestamp(st, tz="America/Bogota")
+        #     if not base_row.empty:
+        #         # Use predefined base location
+        #         driver_pos[drv] = base_row.iloc[0]['address_point']
+        #         # Start time always at 7:00
+        #         st = datetime.combine(
+        #             pd.to_datetime(df_result[start_col].min()).date(),
+        #             time(7, 0)
+        #         )
+        #         driver_end[drv] = pd.Timestamp(st, tz="America/Bogota")
+        #     else:
+        #         # Fallback: use first assigned labor
+        #         first_row = (
+        #             df_result[df_result[driver_col] == drv]
+        #             .dropna(subset=[start_col])
+        #             .sort_values(start_col)
+        #             .iloc[0]
+        #         )
+        #         driver_pos[drv] = first_row['map_start_point']
+        #         st = datetime.combine(
+        #             pd.to_datetime(first_row[start_col]).date(),
+        #             time(7, 0)
+        #         )
+        #         driver_end[drv] = pd.Timestamp(st, tz="America/Bogota")
 
     # --- 5. Recorrer labores ordenadas ---
     for _, row in df_result.dropna(subset=[start_col]).sort_values(start_col).iterrows():

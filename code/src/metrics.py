@@ -762,6 +762,7 @@ def collect_hist_baseline_dfs(
     data_path, 
     instance, 
     fecha_list,
+    distance_method,
     tz: str = "America/Bogota"
 ) -> Tuple:
     """
@@ -788,7 +789,7 @@ def collect_hist_baseline_dfs(
     all_moves   = []
 
     for fecha in fecha_list:
-        upload_path = f"{data_path}/alfred_baseline/{instance}/res_hist_{fecha}.pkl"
+        upload_path = f"{data_path}/resultados/alfred_baseline/{instance}/{distance_method}/res_hist_{fecha}.pkl"
         
         with open(upload_path, "rb") as f:
             res = pickle.load(f)  # dict: {city: (df_cleaned, df_moves, n_drivers)}
@@ -826,10 +827,7 @@ def collect_hist_baseline_dfs(
         "schedule_date",
         
     ]
-    if assignment_type == 'algorithm':
-        datetime_cols += ["actual_start", "actual_end"]
-    elif assignment_type == 'historic':
-        datetime_cols += ['historic_start', 'historic_end']
+    datetime_cols += ['historic_start', 'historic_end']
 
     for df in (results_df, moves_df):
         for col in datetime_cols:
@@ -838,18 +836,17 @@ def collect_hist_baseline_dfs(
                     pd.to_datetime(df[col], errors="coerce", utc=True)
                       .dt.tz_convert(tz)
                 )
-    
-    # results_df = _order_labor_df(results_df, assignment_type=assignment_type)
 
     return results_df, moves_df
 
 
 def collect_results_to_df(
-    data_path, 
-    instance, 
-    fecha_list,
-    assignment_type = 'algorithm',
-    tz: str = "America/Bogota"
+    data_path: str,
+    instance: str,
+    fecha_list: list,
+    assignment_type: str = 'algorithm',
+    distance_method: str = 'haversine',
+    tz: str = "America/Bogota",
 ) -> Tuple:
     """
     Carga resultados desde pickles y devuelve dos DataFrames consolidados:
@@ -876,9 +873,9 @@ def collect_results_to_df(
 
     for fecha in fecha_list:
         if assignment_type == 'algorithm':
-            upload_path = f"{data_path}/resultados/{instance_map[instance]}_inst/{instance}/res_{fecha}.pkl"
+            upload_path = f"{data_path}/resultados/offline_operation/{instance}/{distance_method}/res_{fecha}.pkl"
         elif assignment_type == 'historic':
-            upload_path = f"{data_path}/resultados/{instance_map[instance]}_inst/{instance}/res_hist_{fecha}.pkl"
+            upload_path = f"{data_path}/resultados/alfred_baseline/{instance}/{distance_method}/res_hist_{fecha}.pkl"
         
         with open(upload_path, "rb") as f:
             res = pickle.load(f)  # dict: {city: (df_cleaned, df_moves, n_drivers)}
@@ -1011,8 +1008,6 @@ def collect_results_from_dicts(
                       .dt.tz_convert(tz)
                 )
 
-    # results_df = _order_labor_df(results_df, assignment_type=assignment_type)
-
     return results_df, moves_df
 
 
@@ -1092,3 +1087,10 @@ def compute_metrics_with_moves(
 
     return metrics_df
 
+
+def compute_iteration_metrics(metrics):
+    iter_vt_labors = sum(sum(metrics['vt_count']) for metrics in metrics.values())
+    iter_extra_time = round(sum(sum(metrics['driver_extra_time']) for metrics in metrics.values()), 2)
+    iter_dist = round(sum(sum(metrics['driver_move_distance']) for metrics in metrics.values()), 2)
+
+    return iter_vt_labors, iter_extra_time, iter_dist

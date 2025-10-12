@@ -7,10 +7,10 @@ from time import perf_counter
 
 # sys.path.append(os.path.abspath(os.path.join('../src')))  # Adjust as needed
 
-from src.data_load import load_tables, load_instance, load_distances
-from src.filtering import filter_labors_by_date
-from src.metrics import collect_results_from_dicts, compute_metrics_with_moves
-from src.utils import codificacion_ciudades
+from src.data_load import load_inputs, load_distances
+from src.filtering import filter_labors_by_date, flexible_filter
+from src.metrics import collect_results_from_dicts, compute_metrics_with_moves, compute_iteration_metrics
+from src.utils import process_instance, get_max_drivers, consolidate_run_results
 from src.config import *
 from src.experimentation_config import instance_map, fechas_dict, max_drivers
 from src.pipeline import run_city_pipeline
@@ -26,25 +26,28 @@ from tqdm import tqdm
 if __name__ == "__main__":
     data_path = f'{REPO_PATH}/data'
     instance_input = input('Input the instance -inst{}- to run?: ')
-    instance = f'inst{instance_input}'
-    assert instance in instance_map.keys(), f'Non-existing instance "{instance}"!'
-    instance_type = instance_map[instance]
+    instance, instance_type = process_instance(instance_input)
     
+    ''' START RUN PARAMETERS'''
     distance_type = 'osrm'              # Options: ['osrm', 'manhattan']
-    distance_method = 'precalced'       # Options: ['precalced', 'haversine']
+    distance_method = 'haversine'       # Options: ['precalced', 'haversine']
 
     assignment_type = 'algorithm'
+
+    driver_init_mode = 'historic_directory' # Options: ['historic_directory', 'driver_directory']
+    ''' END RUN PARAMETERS'''
 
     max_iterations = max(iterations_nums)
     fechas = fechas_dict[instance]
     initial_day = int(fechas[0].rsplit('-')[2])
 
-    ### Optimization config
-    for optimization_variable in metrics[::]:
-        print_header(instance, distance_method, assignment_type, optimization_variable)    
+    # Load shared inputs only once
+    (directorio_df, labor_raw_df, cities_df, duraciones_df,
+        valid_cities, labors_real_df, directorio_hist_df) = load_inputs(data_path, instance)
 
-        directorio_df, labor_raw_df, cities_df, duraciones_df, valid_cities = load_tables(data_path)
-        labors_real_df = load_instance(data_path, instance, labor_raw_df)
+    ### Optimization config
+    for optimization_variable in metrics[2::]:
+        print_header(instance, distance_method, assignment_type, optimization_variable)    
 
         for alpha in alphas:
             print_iter_header(alpha)
@@ -59,39 +62,37 @@ if __name__ == "__main__":
                 ''' START RUN ITERATION FOR SET ALPHA '''
                 run_results = []
                 for start_date in fechas:
-                    if distance_method == 'precalced':
-                        dist_dict = load_distances(data_path, distance_type, instance)
-                    else:
-                        dist_dict = {}
 
+                    dist_dict = load_distances(data_path, distance_type, instance)
                     df_day = filter_labors_by_date(
                         labors_real_df, start_date=start_date, end_date='one day lag'
                     )
                     results = []
+                    
                     for city in valid_cities:
                         
-                        base_day = pd.to_datetime(start_date).date()
-                        max_drivers_dict = max_drivers.get(instance, {}).get(city, None)
-                        if max_drivers_dict:
-                            max_drivers_num = max_drivers_dict[base_day.day - initial_day]
+                        max_drivers_num = get_max_drivers(instance, city, max_drivers, start_date, initial_day)
+                        directorio_hist_filtered_df = flexible_filter(
+                            directorio_hist_df, city=city, date=start_date
+                        )
 
                         res = run_city_pipeline(
-                            city, start_date, df_day, directorio_df, duraciones_df,
+                            city, 
+                            start_date, 
+                            df_day, 
+                            directorio_hist_filtered_df, 
+                            duraciones_df,
                             assignment_type, 
                             alpha=alpha,
                             DIST_DICT=dist_dict.get(city, {}),
                             dist_method=distance_method,
                             max_drivers_num=max_drivers_num,
                             instance=instance,
+                            driver_init_mode=driver_init_mode
                         )
                         results.append(res)
 
-                    results_by_city = {}
-                    for i in range(len(results)):
-                        if len(results[i]) > 0:
-                            city, df_cleaned, df_moves, n_drivers = results[i]
-                            results_by_city[city] = (df_cleaned, df_moves, n_drivers)
-
+                    results_by_city = consolidate_run_results(results)
                     run_results.append(results_by_city)
                 ''' END RUN ITERATION '''
 
@@ -103,7 +104,8 @@ if __name__ == "__main__":
                 metrics = {}
                 for city in valid_cities:
                     metrics[city] = compute_metrics_with_moves(
-                        results_df, moves_df,
+                        results_df, 
+                        moves_df,
                         fechas=fechas,
                         dist_dict=dist_dict,
                         workday_hours=8,
@@ -113,52 +115,20 @@ if __name__ == "__main__":
                         dist_method=distance_method
                     )
 
-                iter_vt_labors = sum(sum(metrics['vt_count']) for metrics in metrics.values())
-                iter_extra_time = round(sum(sum(metrics['driver_extra_time']) for metrics in metrics.values()), 2)
-                iter_dist = round(sum(sum(metrics['driver_move_distance']) for metrics in metrics.values()), 2)
+                iter_vt_labors, iter_extra_time, iter_dist = compute_iteration_metrics(metrics)
 
                 ''' UPDATE INCUMBENT '''
                 if iter_vt_labors >= inc_vt_labors:
                     update = False
-
-                    # if optimization_variable == "driver_distance":
-                    #     update = iter_dist < inc_dist
-
-                    # elif optimization_variable == "driver_extra_time":
-                    #     update = iter_extra_time < inc_extra_time or inc_extra_time == 0
-
-                    # elif optimization_variable == "hybrid":
-                    #     # Puntaje nuevo
-                    #     norm_dist_new = iter_dist / dist_norm_factor
-                    #     norm_extra_new = iter_extra_time / extra_time_norm_factor
-                    #     new_score = norm_dist_new + norm_extra_new
-
-                    #     # Puntaje incumbente
-                    #     norm_dist_inc = inc_dist / dist_norm_factor
-                    #     norm_extra_inc = inc_extra_time / extra_time_norm_factor
-                    #     inc_score = norm_dist_inc + norm_extra_inc
-
-                    #     update = new_score < inc_score
-
-                    # if update:
-                    #     duration = round(perf_counter() - start, 1)
-                    #     inc_vt_labors = iter_vt_labors
-                    #     inc_extra_time = iter_extra_time
-                    #     inc_dist = iter_dist
-                    #     inc_values = (iter, inc_extra_time, inc_dist, duration)
-
-                    #     inc_results = results_df
-                    #     inc_moves = moves_df
-                    #     inc_metrics = metrics
                     
                     update, new_score, inc_score = should_update_incumbent(
-                    optimization_variable,
-                    iter_dist=iter_dist,
-                    iter_extra_time=iter_extra_time,
-                    inc_dist=inc_dist,
-                    inc_extra_time=inc_extra_time,
-                    dist_norm_factor=dist_norm_factor,
-                    extra_time_norm_factor=extra_time_norm_factor
+                        optimization_variable,
+                        iter_dist=iter_dist,
+                        iter_extra_time=iter_extra_time,
+                        inc_dist=inc_dist,
+                        inc_extra_time=inc_extra_time,
+                        dist_norm_factor=dist_norm_factor,
+                        extra_time_norm_factor=extra_time_norm_factor
                     )
 
                     if update:
@@ -193,8 +163,8 @@ if __name__ == "__main__":
                     )
 
                     save_full_path = (
-                        f"{data_path}/resultados/alpha_calibration/{distance_method}/"
-                        f"{instance}/{optimization_variable}/res_{alpha:.1f}_{iter}.pkl"
+                        f"{data_path}/resultados/alpha_calibration/{instance}/"
+                        f"{distance_method}/{optimization_variable}/res_{alpha:.1f}_{iter}.pkl"
                     )
                     with open(save_full_path, 'wb') as f:
                         pickle.dump([inc_values, duration, inc_results, inc_moves, inc_metrics], f)
