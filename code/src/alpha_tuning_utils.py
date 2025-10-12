@@ -116,8 +116,8 @@ def collect_alpha_results_to_df(
     for metric in metrics: 
         for alpha in alphas:
             for num_iter in iterations_nums:
-                upload_path = (f'{data_path}/resultados/alpha_calibration/{dist_method}/'
-                               f'{instance}/{metric}/res_{alpha:.1f}_{num_iter}.pkl')
+                upload_path = (f'{data_path}/resultados/alpha_calibration/{instance}/'
+                               f'{dist_method}/{metric}/res_{alpha:.1f}_{num_iter}.pkl')
 
                 if not os.path.exists(upload_path):
                     continue
@@ -173,7 +173,7 @@ def collect_alpha_metrics(
     optimization=None
 ) -> pd.DataFrame:
     rows = []
-    base_path = f"{data_path}/resultados/alpha_calibration/{dist_method}/{instance}/{optimization}"
+    base_path = f"{data_path}/resultados/alpha_calibration/{instance}/{dist_method}/{optimization}"
 
     for alpha in alphas:
         for num_iter in iterations_nums:

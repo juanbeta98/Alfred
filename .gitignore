@@ -3,3 +3,4 @@ data/data_raw/old
 data/data_clean/templates
 data/resultados
 .DS_Store
+data/instances/artif_inst/archive
