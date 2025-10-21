@@ -11,7 +11,7 @@ from src.plotting import plot_indicator_evolution, plot_metrics_comparison, plot
 from src.metrics import collect_vt_metrics_range, show_day_report_dayonly, compute_indicators, collect_results_to_df
 from src.config import *
 from src.utils import get_city_name_from_code, get_city_name
-from src.algorithms import build_driver_movements
+from code.src.offline_algorithms import build_driver_movements
 
 data_path = '../data'
 instance = 'inst3'

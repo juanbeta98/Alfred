@@ -13,7 +13,7 @@ from src.data_load import load_tables # type: ignore
 from src.filtering import filter_labors_by_date, filter_labors_by_city, filter_labores # type: ignore
 from src.utils import codificacion_ciudades
 from src.config import * # type: ignore
-from src.algorithms import remove_drivers, compute_avg_times, run_iteration_chronological, init_drivers # type: ignore
+from code.src.offline_algorithms import remove_drivers, compute_avg_times, run_iteration_chronological, init_drivers # type: ignore
 from src.pipeline import run_city_pipeline
 
 

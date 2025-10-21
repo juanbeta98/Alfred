@@ -21,7 +21,7 @@ from src.config import *
 
 data_path = f'{REPO_PATH}/data'
 
-instance = 'instAD1'
+instance = 'instRD1'
 distance_method = 'haversine'
 
 inst_path = f'{data_path}/resultados/online_operation/{instance}'

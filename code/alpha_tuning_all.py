@@ -30,7 +30,7 @@ if __name__ == "__main__":
     
     ''' START RUN PARAMETERS'''
     distance_type = 'osrm'              # Options: ['osrm', 'manhattan']
-    distance_method = 'haversine'       # Options: ['precalced', 'haversine']
+    distance_method = 'precalced'       # Options: ['precalced', 'haversine']
 
     assignment_type = 'algorithm'
 
@@ -46,7 +46,8 @@ if __name__ == "__main__":
         valid_cities, labors_real_df, directorio_hist_df) = load_inputs(data_path, instance)
 
     ### Optimization config
-    for optimization_variable in metrics[2::]:
+    # for optimization_variable in [metrics[2]]:
+    for optimization_variable in metrics:
         print_header(instance, distance_method, assignment_type, optimization_variable)    
 
         for alpha in alphas:
