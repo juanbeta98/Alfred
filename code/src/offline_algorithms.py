@@ -638,167 +638,6 @@ def get_historic_driver(
 '''
 AUXILIARY FUNCTIONS
 '''
-# def build_driver_movements(
-#     df_result: pd.DataFrame,
-#     directorio_df: pd.DataFrame,
-#     day_str: str,
-#     DISTANCE_METHOD: str,
-#     ALFRED_SPEED: float,
-#     ciudad: str,
-#     assignment_type: str = 'algorithm',
-#     driver_init_mode: str = 'historic_directory',
-#     dist_dict: dict = None,
-#     **kwargs
-# ) -> pd.DataFrame:
-#     """
-#     Reconstruye actividades de tipo DRIVER_MOVE y FREE_TIME a partir de las labores,
-#     incluyendo la distancia recorrida (km) en los movimientos.
-
-#     Parámetros
-#     ----------
-#     df_result : pd.DataFrame
-#         DataFrame de labores.
-#         - Simulación: ['assigned_driver', 'actual_start', 'actual_end', ...]
-#         - Real: ['alfred', 'labor_start_date', 'labor_end_date', ...]
-#     directorio_df : pd.DataFrame o None
-#         Solo necesario en modo simulado. Directorio con columnas
-#         ['ALFRED'S', 'latitud', 'longitud', 'city', 'start_time'].
-#     day_str : str
-#         Día de la simulación en formato 'YYYY-MM-DD'.
-#     DISTANCE_METHOD : str
-#         Método de cálculo de distancias.
-#     ALFRED_SPEED : float
-#         Velocidad media de los conductores (km/h).
-#     ciudad : str
-#         Ciudad a procesar (solo en modo simulado).
-#     assignment_type : str, default 'algorithm'
-#         'algorithm' → usa columnas simuladas, 'historic' → usa asignación real.
-#     dist_dict : dict, optional
-#         Diccionario de distancias precalculadas.
-
-#     Retorna
-#     -------
-#     pd.DataFrame
-#         DataFrame con labores originales + movimientos + tiempos libres,
-#         con columnas adicionales 'duration_min' y 'distance_km'.
-#     """
-
-#     # --- 1. Mapear nombres de columnas según origen ---
-#     if assignment_type == 'algorithm':
-#         driver_col, start_col, end_col = "assigned_driver", "actual_start", "actual_end"
-#     elif assignment_type == 'historic':
-#         driver_col, start_col, end_col = "historic_driver", "historic_start", "historic_end"
-#     else:
-#         raise ValueError("assignment_type debe ser 'historic' o 'algorithm'")
-
-#     records = []
-
-#     # --- 2. Zona horaria ---
-#     tz = df_result['schedule_date'].dt.tz
-#     if tz is None and not df_result[start_col].dropna().empty:
-#         tz = df_result[start_col].dropna().iloc[0].tz
-
-#     # --- 3. Fecha base ---
-#     valid_dates = df_result['schedule_date'].dropna().dt.date
-#     first_day = pd.to_datetime(day_str).date() if valid_dates.empty else valid_dates.min()
-
-#     # --- 4. Inicializar posición/hora de inicio de alfreds ---
-#     driver_pos, driver_end = {}, {}
-
-#     if driver_init_mode == 'historic_directory':
-#         for _, d in directorio_df.iterrows():
-#             name = d['alfred']
-#             driver_pos[name] = d['address_point']
-#             st = datetime.combine(first_day, time(7, 0))
-#             driver_end[name] = pd.Timestamp(st, tz=tz)
-    
-#     elif driver_init_mode == 'driver_directory':
-#         df_dir_city = directorio_df[directorio_df['city'] == ciudad]
-#         for _, d in df_dir_city.iterrows():
-#             if pd.isna(d['latitud']):
-#                 continue
-#             name = d["ALFRED'S"]
-#             driver_pos[name] = f"POINT ({d['longitud']} {d['latitud']})"
-#             st = datetime.combine(first_day, datetime.strptime(d['start_time'], '%H:%M:%S').time())
-#             driver_end[name] = pd.Timestamp(st, tz=tz)
-
-
-#     # --- 5. Recorrer labores ordenadas ---
-#     for _, row in df_result.dropna(subset=[start_col]).sort_values(start_col).iterrows():
-#         drv = row[driver_col]
-
-#         if pd.notna(drv) and row['labor_category'] == 'VEHICLE_TRANSPORTATION':
-#             prev_e, prev_p = driver_end[drv], driver_pos[drv]
-
-#             if row[start_col] > prev_e:
-#                 # Distancia entre ubicaciones
-#                 dkm, _ = distance(prev_p, row['map_start_point'], method=DISTANCE_METHOD, dist_dict=dist_dict, **kwargs)
-#                 t_move = timedelta(minutes=(0 if math.isnan(dkm) else dkm / ALFRED_SPEED * 60))
-#                 depart = max(prev_e, row[start_col] - t_move)
-
-#                 # FREE_TIME
-#                 if depart > prev_e:
-#                     records.append({
-#                         'service_id': row['service_id'],
-#                         'labor_id': f"{int(row['labor_id'])}_free",
-#                         'labor_name': 'FREE_TIME',
-#                         'labor_category': 'FREE_TIME',
-#                         driver_col: drv,
-#                         'schedule_date': row['schedule_date'],
-#                         start_col: prev_e,
-#                         end_col: depart,
-#                         'start_point': prev_p,
-#                         'end_point': prev_p,
-#                         'distance_km': 0.0
-#                     })
-
-#                 # DRIVER_MOVE
-#                 records.append({
-#                     'service_id': row['service_id'],
-#                     'labor_id': f"{int(row['labor_id'])}_move",
-#                     'labor_name': 'DRIVER_MOVE',
-#                     'labor_category': 'DRIVER_MOVE',
-#                     driver_col: drv,
-#                     'schedule_date': row['schedule_date'],
-#                     start_col: depart,
-#                     end_col: row[start_col],
-#                     'start_point': prev_p,
-#                     'end_point': row['map_start_point'],
-#                     'distance_km': dkm
-#                 })
-
-#         # Labor original (no distancia → NaN)
-#         records.append({
-#             'service_id': row['service_id'],
-#             'labor_id': int(row['labor_id']),
-#             'labor_name': row['labor_name'],
-#             'labor_category': row['labor_category'],
-#             driver_col: drv,
-#             'schedule_date': row['schedule_date'],
-#             start_col: row[start_col],
-#             end_col: row[end_col],
-#             'start_point': row['map_start_point'],
-#             'end_point': row['map_end_point'],
-#             'distance_km': float("nan")
-#         })
-
-#         # Actualizar estado del conductor
-#         if pd.notna(drv) and pd.notna(row[end_col]):
-#             driver_end[drv] = row[end_col]
-#             driver_pos[drv] = row['map_end_point']
-
-#     # --- 6. Convertir a DataFrame y calcular duración ---
-#     df_moves = pd.DataFrame(records)
-#     if not df_moves.empty:
-#         df_moves[start_col] = pd.to_datetime(df_moves[start_col])
-#         df_moves[end_col] = pd.to_datetime(df_moves[end_col])
-#         df_moves['duration_min'] = (
-#             (df_moves[end_col] - df_moves[start_col]).dt.total_seconds() / 60
-#         ).round(1)
-
-#     return df_moves
-
-
 def build_driver_movements(
     labors_df: pd.DataFrame,
     directory_df: pd.DataFrame,
@@ -967,7 +806,7 @@ def build_driver_movements(
         records.append({
             'service_id': row.get('service_id', np.nan),
             'labor_id': row['labor_id'],
-            'labor_enh_id': f"{int(row['labor_id'])}_free",
+            'labor_context_id': f"{int(row['labor_id'])}_free",
             'labor_name': 'FREE_TIME',
             'labor_category': 'FREE_TIME',
             driver_col: drv,
@@ -987,7 +826,7 @@ def build_driver_movements(
         records.append({
             'service_id': row.get('service_id', np.nan),
             'labor_id': row['labor_id'],
-            'labor_enh_id': f"{int(row['labor_id'])}_move",
+            'labor_context_id': f"{int(row['labor_id'])}_move",
             'labor_name': 'DRIVER_MOVE',
             'labor_category': 'DRIVER_MOVE',
             driver_col: drv,
@@ -1005,7 +844,7 @@ def build_driver_movements(
         records.append({
             'service_id': row.get('service_id', np.nan),
             'labor_id': row['labor_id'],
-            'labor_enh_id': row['labor_id'],
+            'labor_context_id': f'{row['labor_id']}_labor',
             'labor_name': row['labor_name'],
             'labor_category': row['labor_category'],
             driver_col: drv,

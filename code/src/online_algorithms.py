@@ -17,6 +17,7 @@ def evaluate_driver_feasibility(
     new_labor: pd.Series,
     driver:float,
     moves_driver_df: pd.DataFrame,
+    directory_df: pd.DataFrame,
     ALFRED_SPEED: float,
     VEHICLE_TRANSPORT_SPEED: float,
     TIEMPO_ALISTAR: float,
@@ -48,7 +49,8 @@ def evaluate_driver_feasibility(
         feasible, infeasible_log, insertion_plan = _direct_insertion_empty_driver(
             new_labor=new_labor,
             driver=driver,
-            ALFRED_SPEED=ALFRED_SPEED,
+            directory_df=directory_df,
+            alfred_speed=ALFRED_SPEED,
             VEHICLE_TRANSPORT_SPEED=VEHICLE_TRANSPORT_SPEED,
             TIEMPO_ALISTAR=TIEMPO_ALISTAR,
             TIEMPO_FINALIZACION=TIEMPO_FINALIZACION,
@@ -60,30 +62,30 @@ def evaluate_driver_feasibility(
     # ---------------------------------------------------------------------------------------
     # Case 2: insertion before first labor
     # ---------------------------------------------------------------------------------------
-    is_before_first_labor = _is_creation_before_first_labor(moves_driver_df)
+    is_before_first_labor = _is_creation_before_first_labor(
+        moves_driver_df,
+        directory_df,
+        driver
+    )
     if is_before_first_labor:
-        # --- Skip if next labor starts before new labor’s schedule
-        if new_labor['schedule_date'] < moves_driver_df.loc[0,'actual_start']:
+        # --- Skip if next labor starts before new labor’s starts moving
+        if new_labor['schedule_date'] <= moves_driver_df.loc[2,'schedule_date']:
             feasible, infeasible_log, insertion_plan = _evaluate_and_execute_insertion_before_first_labor(
-                new_labor,
-                moves_driver_df,
-                driver,
-                VEHICLE_TRANSPORT_SPEED,
-                ALFRED_SPEED,
-                TIEMPO_ALISTAR,
-                TIEMPO_FINALIZACION,
-                TIEMPO_GRACIA,
-                EARLY_BUFFER
+                new_labor=new_labor,
+                moves_driver_df=moves_driver_df,
+                driver=driver,
+                directory_df=directory_df,
+                vehicle_transport_speed=VEHICLE_TRANSPORT_SPEED,
+                alfred_speed=ALFRED_SPEED,
+                tiempo_alistar=TIEMPO_ALISTAR,
+                tiempo_finalizacion=TIEMPO_FINALIZACION,
+                tiempo_gracia=TIEMPO_GRACIA,
+                early_buffer=EARLY_BUFFER
             )
 
             return feasible, infeasible_log, insertion_plan
-        else:
-            labor_iter = 0
-    else:
-        # Find the first 'labor' type row in the dataframe dynamically
-        labor_iter = moves_driver_df.index[
-            moves_driver_df["labor_id"].astype(str).str.match(r"^\d+$")
-        ][0]
+
+    labor_iter = 2
 
               
     # ---------------------------------------------------------------------------------------
@@ -91,7 +93,11 @@ def evaluate_driver_feasibility(
     # ---------------------------------------------------------------------------------------
     n_rows = len(moves_driver_df)
 
-    while labor_iter + 3 <= n_rows:
+    while labor_iter < len(moves_driver_df):
+        # --- Break if the current labor is the next labor
+        if labor_iter + 3 > len(moves_driver_df):
+                break
+        
         # --- Context: previous labor & next labor
         curr_end_time, curr_end_pos, next_start_time, next_start_pos = \
             _get_driver_context(moves_driver_df, labor_iter)
@@ -100,7 +106,7 @@ def evaluate_driver_feasibility(
         next_labor_id_candidate = moves_driver_df.loc[labor_iter + 3, "labor_id"]
 
         # --- Skip if next labor starts before new labor’s schedule
-        if next_start_time <= new_labor['schedule_date']:
+        if next_start_time < new_labor['schedule_date']:
             labor_iter += 3
             continue
 
@@ -118,14 +124,15 @@ def evaluate_driver_feasibility(
             break
 
         # --- Adjust if arriving too early (driver waits)
-        real_arrival_time = _adjust_for_early_arrival(
-            would_arrive_at, 
-            new_labor['schedule_date'], 
-            EARLY_BUFFER
+        real_arrival_time, start_move_time = _adjust_for_early_arrival(
+            would_arrive_at=would_arrive_at,
+            travel_time=travel_time_to_new,
+            schedule_date=new_labor['schedule_date'], 
+            early_buffer=EARLY_BUFFER
         )
 
         # --- Compute new labor end time
-        finish_new_labor_time, finish_new_labor_pos, _, dist_service = \
+        finish_new_labor_time, finish_new_labor_pos, new_labor_duration, new_labor_distance = \
             _compute_service_end_time(
                 arrival_time=real_arrival_time,
                 start_pos=new_labor['start_address_point'],
@@ -177,17 +184,19 @@ def evaluate_driver_feasibility(
 
         # Precompute updated moves for the new labor and next labor
         new_moves = _build_new_moves_block(
-            new_labor,
+            new_labor=new_labor,
             driver=driver,
             start_free_time=curr_end_time,
+            start_move_time=start_move_time,
+            move_duration_min=travel_time_to_new,
             real_arrival_time=real_arrival_time,
+            new_labor_distance=new_labor_distance,
+            new_labor_duration=new_labor_duration,
             finish_new_time=finish_new_labor_time,
             start_pos=curr_end_pos,
             start_address=new_labor["start_address_point"],
             end_address=new_labor["end_address_point"],
             dist_to_new=dist_to_new_service,
-            dist_service=dist_service,
-            alfred_speed=ALFRED_SPEED
         )
 
         # Build insertion plan dict (the full blueprint)
@@ -202,7 +211,8 @@ def evaluate_driver_feasibility(
             "new_labor_timing": {
                 "arrival_time": real_arrival_time,
                 "finish_time": finish_new_labor_time,
-                "travel_distance": dist_service,
+                'total_duration': new_labor_duration,
+                "travel_distance": new_labor_distance,
             },
             "updated_labors": [{
                 "labor_id": next_labor_id_candidate,
@@ -222,12 +232,12 @@ def evaluate_driver_feasibility(
     # ---------------------------------------------------------------------------------------
     if not feasible and infeasible_log == '' and labor_iter >= n_rows - 3:
         # feasible = True
-        prev_labor_id = moves_driver_df.loc[n_rows - 1, "labor_id"]
+        prev_labor_id = moves_driver_df.loc[labor_iter, "labor_id"]
 
         # Compute basic timing info
-        curr_end_time = moves_driver_df.loc[n_rows - 1, "actual_end"]
-        curr_end_pos = moves_driver_df.loc[n_rows - 1, "end_point"]
-        would_arrive_at, dist_to_new_service, _ = _compute_arrival_to_next_labor(
+        curr_end_time = moves_driver_df.loc[labor_iter, "actual_end"]
+        curr_end_pos = moves_driver_df.loc[labor_iter, "end_point"]
+        would_arrive_at, dist_to_new_service, travel_time_to_new = _compute_arrival_to_next_labor(
             curr_end_time,
             curr_end_pos,
             new_labor["start_address_point"],
@@ -240,34 +250,41 @@ def evaluate_driver_feasibility(
             return feasible, infeasible_log, insertion_plan
 
 
-        real_arrival_time = _adjust_for_early_arrival(
-            would_arrive_at, new_labor["schedule_date"], EARLY_BUFFER
+        real_arrival_time, start_move_time = _adjust_for_early_arrival(
+            would_arrive_at=would_arrive_at,
+            travel_time = travel_time_to_new,
+            schedule_date=new_labor["schedule_date"], 
+            early_buffer=EARLY_BUFFER
         )
 
-        finish_new_labor_time, finish_new_labor_pos, total_duration, dist_service = \
+        finish_new_labor_time, finish_new_labor_pos, new_labor_duration, new_labor_distance = \
             _compute_service_end_time(
-                real_arrival_time,
-                new_labor["start_address_point"],
-                new_labor["end_address_point"],
-                VEHICLE_TRANSPORT_SPEED,
-                TIEMPO_ALISTAR,
-                TIEMPO_FINALIZACION,
+                arrival_time=real_arrival_time,
+                start_pos=new_labor["start_address_point"],
+                end_pos=new_labor["end_address_point"],
+                vehicle_speed=VEHICLE_TRANSPORT_SPEED,
+                prep_time=TIEMPO_ALISTAR,
+                finish_time=TIEMPO_FINALIZACION,
             )
 
         new_moves = _build_new_moves_block(
-            new_labor,
+            new_labor=new_labor,
+            driver=driver,
             start_free_time=curr_end_time,
+            start_move_time=start_move_time,
+            move_duration_min=travel_time_to_new,
             real_arrival_time=real_arrival_time,
+            new_labor_distance=new_labor_distance,
+            new_labor_duration=new_labor_duration,
             finish_new_time=finish_new_labor_time,
             start_pos=curr_end_pos,
             start_address=new_labor["start_address_point"],
             end_address=new_labor["end_address_point"],
             dist_to_new=dist_to_new_service,
-            dist_service=dist_service
         )
 
         insertion_plan = {
-            "driver_id": new_labor["driver_id"],
+            "driver_id": driver,
             "new_labor_id": new_labor["labor_id"],
             "prev_labor_id": prev_labor_id,
             "next_labor_id": None,
@@ -277,8 +294,8 @@ def evaluate_driver_feasibility(
             "new_labor_timing": {
                 "arrival_time": real_arrival_time,
                 "finish_time": finish_new_labor_time,
-                "total_duration": total_duration,
-                "travel_distance": dist_service,
+                "total_duration": new_labor_duration,
+                "travel_distance": new_labor_distance,
             },
             "updated_labors": [],
             "affected_labors": [],
@@ -297,18 +314,31 @@ def evaluate_driver_feasibility(
 def _direct_insertion_empty_driver(
     new_labor: pd.Series,
     driver:float,
-    ALFRED_SPEED:float,
+    directory_df:pd.DataFrame,
+    alfred_speed: float,
     VEHICLE_TRANSPORT_SPEED: float,
     TIEMPO_ALISTAR: float,
     TIEMPO_FINALIZACION: float,
     EARLY_BUFFER: float,
 
-) -> Tuple:    
+) -> Tuple:
+    home_pos = directory_df.loc[directory_df['alfred'] == driver, 'address_point'].iloc[0]
+
     # 1. Compute start and end times for the new labor (driver starts “from base” or assumed start)
     start_time = new_labor["schedule_date"]
-    arrival_time =start_time - timedelta(minutes=EARLY_BUFFER)  # no travel, assume immediate availability
+    arrival_time = start_time - timedelta(minutes=EARLY_BUFFER)  # no travel, assume immediate availability
+
+    _, dist_to_new_service, travel_time_to_new = _compute_arrival_to_next_labor(
+        current_end_time=arrival_time, 
+        current_end_pos=home_pos,
+        target_pos=new_labor['start_address_point'],
+        speed=alfred_speed
+    )
     
-    finish_new_time, finish_new_pos, total_duration, dist_service = _compute_service_end_time(
+    start_move_time = arrival_time - timedelta(minutes=travel_time_to_new)
+    
+    finish_new_labor_time, finish_new_labor_pos, new_labor_duration, new_labor_distance = \
+        _compute_service_end_time(
         arrival_time,
         new_labor["start_address_point"],
         new_labor["end_address_point"],
@@ -317,19 +347,21 @@ def _direct_insertion_empty_driver(
         TIEMPO_FINALIZACION,
     )
 
-    # 2. Build the 3-block structure: free (optional), move (optional), labor
+    # Precompute updated moves for the new labor and next labor
     new_moves = _build_new_moves_block(
-        new_labor,
-        driver,
-        start_free_time=None,  # no previous labor
+        new_labor=new_labor,
+        driver=driver,
+        start_free_time=None,
+        start_move_time=start_move_time,
+        move_duration_min=travel_time_to_new,
         real_arrival_time=arrival_time,
-        finish_new_time=finish_new_time,
-        start_pos=None,
+        new_labor_distance=new_labor_distance,
+        new_labor_duration=new_labor_duration,
+        finish_new_time=finish_new_labor_time,
+        start_pos=home_pos,
         start_address=new_labor["start_address_point"],
         end_address=new_labor["end_address_point"],
-        dist_to_new=0,
-        dist_service=dist_service,
-        alfred_speed=ALFRED_SPEED
+        dist_to_new=dist_to_new_service,
     )
 
     # 3. Prepare minimal insertion plan
@@ -343,9 +375,9 @@ def _direct_insertion_empty_driver(
         "new_moves": new_moves,
         "new_labor_timing": {
             "arrival_time": arrival_time,
-            "finish_time": finish_new_time,
-            "total_duration": total_duration,
-            "travel_distance": dist_service
+            "finish_time": finish_new_labor_time,
+            "total_duration": new_labor_duration,
+            "travel_distance": new_labor_distance
         },
         "updated_labors": [],
         "affected_labors": [],
@@ -357,36 +389,77 @@ def _direct_insertion_empty_driver(
 
 
 def _is_creation_before_first_labor(
-    moves_driver_df: pd.DataFrame
+    moves_driver_df: pd.DataFrame,
+    directory_df: pd.DataFrame,
+    driver: str,
 ) -> bool:
-    return not str(moves_driver_df.iloc[0]["labor_id"]).endswith("_free")
+    """
+    Determine if a new labor can be inserted *before* the driver's first scheduled labor.
+
+    Logic:
+    -------
+    If the first movement (the '_free' segment) starts from the same location
+    as the driver's registered starting address in the directory, we can consider
+    the driver as 'at base' before any assigned labor → insertion before first labor is valid.
+
+    Returns
+    -------
+    bool : True if insertion before first labor is possible.
+    """
+    # --- Extract driver's base location from directory ---
+    try:
+        driver_base = (
+            directory_df.loc[directory_df["alfred"] == driver, "address_point"]
+            .dropna()
+            .iloc[0]
+        )
+    except IndexError:
+        # Driver not found in directory → cannot determine base position
+        return False
+
+    first_start = str(moves_driver_df.iloc[0]["start_point"]).strip()
+    driver_base = str(driver_base).strip()
+
+    # --- Compare normalized positions ---
+    return first_start == driver_base
 
 
 def _evaluate_and_execute_insertion_before_first_labor(
     new_labor, 
     moves_driver_df,
-    driver,
-    VEHICLE_TRANSPORT_SPEED: float,
-    ALFRED_SPEED: float,
-    TIEMPO_ALISTAR: float,
-    TIEMPO_FINALIZACION: float,
-    TIEMPO_GRACIA: float,
-    EARLY_BUFFER: float,
+    driver: str,
+    directory_df: pd.DataFrame,
+    vehicle_transport_speed: float,
+    alfred_speed: float,
+    tiempo_alistar: float,
+    tiempo_finalizacion: float,
+    tiempo_gracia: float,
+    early_buffer: float,
 ) -> Tuple:
     
-    real_arrival_time = new_labor["schedule_date"] - timedelta(minutes=EARLY_BUFFER)
+    home_pos = directory_df.loc[directory_df['alfred'] == driver, 'address_point'].iloc[0]
+
+    arrival_time = new_labor["schedule_date"] - timedelta(minutes=early_buffer)
+    
+    _, dist_to_new_service, travel_time_to_new = _compute_arrival_to_next_labor(
+        current_end_time=arrival_time, 
+        current_end_pos=home_pos,
+        target_pos=new_labor['start_address_point'],
+        speed=alfred_speed)
+    
+    start_move_time = arrival_time - timedelta(minutes=travel_time_to_new)
 
     next_labor_id_candidate = moves_driver_df.loc[0, 'labor_id']
 
     # Compute new labor end time
-    finish_new_labor_time, finish_new_labor_pos, _, dist_service = \
+    finish_new_labor_time, finish_new_labor_pos, new_labor_duration, new_labor_distance = \
         _compute_service_end_time(
-            arrival_time=real_arrival_time,
+            arrival_time=arrival_time,
             start_pos=new_labor['start_address_point'],
             end_pos=new_labor['end_address_point'],
-            vehicle_speed=VEHICLE_TRANSPORT_SPEED,
-            prep_time=TIEMPO_ALISTAR,
-            finish_time=TIEMPO_FINALIZACION
+            vehicle_speed=vehicle_transport_speed,
+            prep_time=tiempo_alistar,
+            finish_time=tiempo_finalizacion
         )
     
     # --- Check feasibility with next scheduled labor
@@ -396,8 +469,8 @@ def _evaluate_and_execute_insertion_before_first_labor(
             new_finish_pos=finish_new_labor_pos,
             next_start_time=moves_driver_df.loc[0, 'schedule_date'],
             next_start_pos=moves_driver_df.loc[0, 'start_point'],
-            driver_speed=ALFRED_SPEED, 
-            grace_time=TIEMPO_GRACIA
+            driver_speed=alfred_speed, 
+            grace_time=tiempo_gracia,
         )
 
     if not feasible_next:
@@ -407,14 +480,35 @@ def _evaluate_and_execute_insertion_before_first_labor(
         )
         return False, infeasible_log, None
 
+    new_moves = _build_new_moves_block(
+        new_labor=new_labor,
+        driver=driver,
+        start_free_time=None,
+        start_move_time=start_move_time,
+        move_duration_min=travel_time_to_new,
+        real_arrival_time=arrival_time,
+        new_labor_distance=new_labor_distance,
+        new_labor_duration=new_labor_duration,
+        finish_new_time=finish_new_labor_time,
+        start_pos=home_pos,
+        start_address=new_labor["start_address_point"],
+        end_address=new_labor["end_address_point"],
+        dist_to_new=dist_to_new_service,
+        )
+    
     # Now simulate downstream shift from the FIRST labor
     downstream_ok, downstream_shifts = _simulate_downstream_shift(
-        driver_df=moves_driver_df,
-        from_labor_id=moves_driver_df.iloc[0]["labor_id"],
-        start_shift_time=finish_new_labor_time,
-        start_shift_pos=finish_new_labor_pos,
-        ALFRED_SPEED=ALFRED_SPEED,
-        TIEMPO_GRACIA=TIEMPO_GRACIA,
+        moves_driver_df=moves_driver_df,
+        start_idx=0,
+        next_labor_id=moves_driver_df.iloc[0]["labor_id"],
+        next_labor_arrival=finish_new_labor_time,
+        next_labor_start_pos=finish_new_labor_pos,
+        ALFRED_SPEED=alfred_speed,
+        VEHICLE_TRANSPORT_SPEED=vehicle_transport_speed,
+        TIEMPO_ALISTAR=tiempo_alistar,
+        TIEMPO_FINALIZACION=tiempo_finalizacion,
+        TIEMPO_GRACIA=tiempo_gracia,
+        EARLY_BUFFER=early_buffer
     )
 
     if not downstream_ok:
@@ -428,11 +522,11 @@ def _evaluate_and_execute_insertion_before_first_labor(
         "next_labor_id": next_labor_id_candidate,
         "dist_to_new_service": None,
         "dist_to_next_labor": dist_to_next_labor,
-        "new_moves": None,
+        "new_moves": new_moves,
         "new_labor_timing": {
-            "arrival_time": real_arrival_time,
+            "arrival_time": arrival_time,
             "finish_time": finish_new_labor_time,
-            "travel_distance": dist_service,
+            "travel_distance": dist_to_next_labor,
         },
         "updated_labors": [{
             "labor_id": next_labor_id_candidate,
@@ -449,121 +543,142 @@ def _evaluate_and_execute_insertion_before_first_labor(
 
 def _build_new_moves_block(
     new_labor: pd.Series,
-    driver: float,
-    start_free_time: Optional[datetime],
+    driver: str,
+    start_free_time: datetime,
+    start_move_time: datetime,
+    move_duration_min: float,
     real_arrival_time: datetime,
+    new_labor_distance: float,
+    new_labor_duration: float,
     finish_new_time: datetime,
-    start_pos: Optional[Tuple[float, float]],
-    start_address: Tuple[float, float],
-    end_address: Tuple[float, float],
+    start_pos: Optional[str],
+    start_address: str,
+    end_address: str,
     dist_to_new: float,
-    dist_service: float,
-    alfred_speed: float,
 ) -> pd.DataFrame:
     """
-    Construct the three move rows (free, move, labor) associated with a new labor.
+    Construct the three standardized rows (FREE_TIME, DRIVER_MOVE, LABOR)
+    associated with a new labor insertion.
+
+    All labors are represented by exactly three rows:
+        - {labor_id}_free   → FREE_TIME
+        - {labor_id}_move   → DRIVER_MOVE
+        - {labor_id}_labor  → Actual LABOR
+
+    This ensures consistent triplet structure across all labors in moves_df.
 
     Parameters
     ----------
     new_labor : pd.Series
-        Row from labors_dynamic_df with info about the new labor.
-    start_free_time : datetime or None
-        When the previous labor actually ended. None if this is the first labor.
-    real_arrival_time : datetime
-        When the driver actually arrives at the new labor start.
-    finish_new_time : datetime
-        When the driver finishes performing the new labor.
-    start_pos : (float, float) or None
-        Coordinates of previous labor's end. None if first assignment.
-    start_address : (float, float)
-        Start point of the new service.
-    end_address : (float, float)
-        End point of the new service.
+        Row from labors_dynamic_df containing new labor details.
+    driver : str
+        Driver identifier.
+    start_free_time, start_move_time, real_arrival_time, finish_new_time : datetime
+        Precomputed timestamps marking free, move, and labor segments.
+    move_duration_min, new_labor_distance, new_labor_duration : float
+        Precomputed durations (min) and distances (km) for move and labor.
+    start_pos, start_address, end_address : str
+        WKT/point strings for spatial start and end of each segment.
     dist_to_new : float
-        Distance from previous labor’s end to new labor’s start (km).
-    dist_service : float
-        Distance from new labor’s start to its end (km).
+        Distance from previous endpoint to new labor start (km).
+
 
     Returns
     -------
     pd.DataFrame
-        With three rows: `_free`, `_move`, and actual labor.
+        3-row standardized DataFrame for the new labor segment,
+        ready for concatenation into moves_df.
     """
+    new_labor_service_id = new_labor.get("service_id", None)
+    new_labor_labor_id = new_labor["labor_id"]
+    new_labor_schedule_date = new_labor["schedule_date"]
+
+
+    # --- Compute move timing ---
+    move_end_time = real_arrival_time
+
+    # --- Compute free timing ---
+    if start_free_time == None or start_free_time > start_move_time:
+        # No waiting time — zero-duration free
+        start_free_time = end_free_time = start_move_time
+    else:
+        end_free_time = start_move_time
 
     rows = []
 
-    if start_free_time is not None:
-        # Driver is coming from a previous labor
-        # ============================================================
-        # 1️⃣ FREE ROW
-        # ============================================================
-        free_row = {
-            "labor_id": f"{new_labor['labor_id']}_free",
-            "driver_id": driver,
-            "type": "free",
-            "schedule_date": new_labor['schedule_date'],
-            "actual_start": start_free_time,
-            "actual_end": real_arrival_time - timedelta(minutes=(dist_to_new / alfred_speed) * 60),
-            "start_point": start_pos,
-            "end_point": start_pos,
-            "distance_km": 0,
-            "duration_min": (real_arrival_time - start_free_time).total_seconds() / 60.0,
-            "city": new_labor["city"],
-        }
-        rows.append(free_row)
+    # ============================================================
+    # 1️⃣ FREE TIME ROW
+    # ============================================================
+    rows.append({
+        "service_id": new_labor_service_id,
+        "labor_id": new_labor_labor_id,
+        "labor_context_id": f"{new_labor['labor_id']}_free",
+        "labor_name": "FREE_TIME",
+        "labor_category": "FREE_TIME",
+        "assigned_driver": driver,
+        "schedule_date": new_labor_schedule_date,
+        "actual_start": start_free_time,
+        "actual_end": end_free_time,
+        "start_point": start_pos if start_pos is not None else start_address,
+        "end_point": start_pos if start_pos is not None else start_address,
+        "distance_km": 0.0,
+        "duration_min": (end_free_time - start_free_time).total_seconds() / 60.0,
+        "city": new_labor["city"],
+        "date": new_labor.get("date", new_labor["schedule_date"].date()),
+    })
 
-        # ============================================================
-        # 2️⃣ MOVE ROW
-        # ============================================================
-        move_start_time = real_arrival_time - timedelta(minutes=(dist_to_new / alfred_speed) * 60)
-        move_end_time = real_arrival_time
-        move_duration = (move_end_time - move_start_time).total_seconds() / 60.0
-
-        move_row = {
-            "labor_id": f"{new_labor['labor_id']}_move",
-            "driver_id": driver,
-            "type": "move",
-            "schedule_date": new_labor['schedule_date'],
-            "actual_start": move_start_time,
-            "actual_end": move_end_time,
-            "start_point": start_pos if start_pos is not None else start_address,
-            "end_point": start_address,
-            "distance_km": dist_to_new,
-            "duration_min": move_duration,
-            "city": new_labor["city"],
-        }
-        rows.append(move_row)
+    # ============================================================
+    # 2️⃣ DRIVER MOVE ROW
+    # ============================================================
+    rows.append({
+        "service_id": new_labor_service_id,
+        "labor_id": new_labor_labor_id,
+        "labor_context_id": f"{new_labor['labor_id']}_move",
+        "labor_name": "DRIVER_MOVE",
+        "labor_category": "DRIVER_MOVE",
+        "assigned_driver": driver,
+        "schedule_date": new_labor_schedule_date,
+        "actual_start": start_move_time,
+        "actual_end": move_end_time,
+        "start_point": start_pos if start_pos is not None else start_address,
+        "end_point": start_address,
+        "distance_km": dist_to_new,
+        "duration_min": move_duration_min,
+        "city": new_labor["city"],
+        "date": new_labor.get("date", new_labor["schedule_date"].date()),
+    })
 
     # ============================================================
     # 3️⃣ LABOR ROW
     # ============================================================
-    labor_row = {
-        "labor_id": new_labor["labor_id"],
-        "driver_id": driver,
-        "type": "labor",
-        "schedule_date": new_labor["schedule_date"],
+    rows.append({
+        "service_id": new_labor_service_id,
+        "labor_id": new_labor_labor_id,
+        "labor_context_id": f"{new_labor['labor_id']}_labor",
+        "labor_name": new_labor["labor_name"],
+        "labor_category": new_labor["labor_category"],
+        "assigned_driver": driver,
+        "schedule_date": new_labor_schedule_date,
         "actual_start": real_arrival_time,
         "actual_end": finish_new_time,
         "start_point": start_address,
         "end_point": end_address,
-        "distance_km": dist_service,
-        "duration_min": (finish_new_time - real_arrival_time).total_seconds() / 60.0,
+        "distance_km": new_labor_distance,
+        "duration_min": new_labor_duration,
         "city": new_labor["city"],
-    }
-    rows.append(labor_row)
+        "date": new_labor.get("date", new_labor["schedule_date"].date()),
+    })
 
     # ============================================================
-    # 4️⃣ RETURN AS DATAFRAME
+    # ✅ Return clean and aligned DataFrame
     # ============================================================
-    new_moves_df = pd.DataFrame(rows)
-
-    # ensure correct column order for merging later
     cols = [
-        "labor_id", "driver_id", "type", "schedule_date",
-        "actual_start", "actual_end", "start_point", "end_point",
-        "distance_km", "duration_min", "city",
+        "service_id", "labor_id", "labor_context_id", "labor_name",
+        "labor_category", "assigned_driver", "schedule_date", "actual_start",
+        "actual_end", "start_point", "end_point", "distance_km",
+        "duration_min", "city", "date"
     ]
-    return new_moves_df[cols]
+    return pd.DataFrame(rows)[cols]
 
 
 def _simulate_downstream_shift(
@@ -584,16 +699,16 @@ def _simulate_downstream_shift(
     (either before the first labor or between two existing labors).
     """
     
-    current_labor_id = next_labor_id
+    curr_labor_id = next_labor_id
     
     # --- Initialization ---
     downstream_shifts = []     # Store info of shifts per labor
     feasible = True            # Default to feasible until proven otherwise
 
-    next_labor_actual_start = moves_driver_df.loc[start_idx,'actual_start']
+    curr_labor_actual_start = moves_driver_df.loc[start_idx,'actual_start']
 
     # --- Early exit condition ---
-    shift = (next_labor_arrival - next_labor_actual_start).total_seconds() / 60
+    shift = (next_labor_arrival - curr_labor_actual_start).total_seconds() / 60
     if abs(shift) < 1:
         # No temporal shift → no downstream propagation
         return True, []
@@ -608,9 +723,8 @@ def _simulate_downstream_shift(
         finish_time=TIEMPO_FINALIZACION
     )
 
-
     labor_rows = moves_driver_df[
-    ~moves_driver_df["labor_id"].astype(str).str.contains("_")
+    moves_driver_df["labor_context_id"].astype(str).str.endswith("_labor")
     ].index.tolist()
 
     # Find current labor position among them
@@ -642,13 +756,12 @@ def _simulate_downstream_shift(
             return False, []
 
         # --- Adjust if arriving too early (driver waits)
-        real_arrival_time = _adjust_for_early_arrival(
-            would_arrive_at, 
-            next_start_time,
-            EARLY_BUFFER
+        real_arrival_time, start_move_time = _adjust_for_early_arrival(
+            would_arrive_at=would_arrive_at, 
+            travel_time= travel_time_to_next,
+            schedule_date=next_start_time,
+            early_buffer=EARLY_BUFFER
         )
-
-        start_moving_time = real_arrival_time - timedelta(minutes=travel_time_to_next)
         
         # --- Compute new labor end time
         finish_next_labor_time, finish_next_labor_pos, _, dist_service = \
@@ -662,12 +775,17 @@ def _simulate_downstream_shift(
             )
         
         # --- Save all the changes ---
-        free_time = {'start': curr_end_time, 'end': start_moving_time}
-        move_time = {'start': start_moving_time, 'end': real_arrival_time}
+        free_time = {'start': curr_end_time, 'end': start_move_time}
+        move_time = {'start': start_move_time, 'end': real_arrival_time}
         labor_time = {'start': real_arrival_time, 'end': finish_next_labor_time}
+        
+        # --- Update tracking variables ---
+        current_labor_id = moves_driver_df.loc[i, 'labor_id']
+        curr_end_time = finish_next_labor_time
+        curr_end_pos = finish_next_labor_pos
 
-        curr_labor_id = moves_driver_df.loc[i+3, 'labor_id']
-        downstream_shifts.append({curr_labor_id:[free_time, move_time, labor_time]})
+        # --- Log downstream changes ---
+        downstream_shifts.append({current_labor_id:[free_time, move_time, labor_time]})
 
         shift = (labor_time['end'] - moves_driver_df.loc[i, 'actual_end']).total_seconds() / 60
         if abs(shift) < 1:
@@ -704,15 +822,20 @@ def _compute_arrival_to_next_labor(
 
 
 def _adjust_for_early_arrival(
-    would_arrive_at, 
-    scheduled_date, 
+    would_arrive_at,
+    travel_time,
+    schedule_date, 
     early_buffer: float = 30):
     """
     Adjusts arrival time if driver would arrive too early.
     Ensures driver waits to arrive no earlier than (schedule_date - early_buffer).
     """
-    earliest_allowed = scheduled_date - timedelta(minutes=early_buffer)
-    return max(would_arrive_at, earliest_allowed)
+    earliest_allowed = schedule_date - timedelta(minutes=early_buffer)
+
+    real_arrival_time = max(would_arrive_at, earliest_allowed)
+    move_start_time =  real_arrival_time - timedelta(minutes=travel_time)
+
+    return real_arrival_time, move_start_time
 
 
 def _compute_service_end_time(
@@ -724,11 +847,11 @@ def _compute_service_end_time(
     finish_time,
 ) -> Tuple:
     """Compute finish time and position of performing the new service."""
-    dist, _ = distance(start_pos, end_pos, method='haversine')
-    travel_time = dist / vehicle_speed * 60
-    total_duration = prep_time + travel_time + finish_time
-    finish_time = arrival_time + timedelta(minutes=total_duration)
-    return finish_time, end_pos, total_duration, dist
+    labor_distance, _ = distance(start_pos, end_pos, method='haversine')
+    travel_time = labor_distance / vehicle_speed * 60
+    labor_total_duration = prep_time + travel_time + finish_time
+    finish_time = arrival_time + timedelta(minutes=labor_total_duration)
+    return finish_time, end_pos, labor_total_duration, labor_distance
 
 
 def _can_reach_next_labor(
@@ -911,55 +1034,67 @@ def filter_dfs_for_insertion(
     return labors_filtered, moves_filtered
 
 
-# ''' Insertion functions'''
 # def get_best_insertion(candidate_insertions, selection_mode="min_total_distance", random_state=None):
 #     """
-#     Selects the best driver among feasible insertions based on a chosen criterion.
+#     Selects the best driver among feasible insertion options.
 
 #     Parameters
 #     ----------
-#     candidate_insertions : list of tuples
-#         Each tuple should be:
-#         (driver, insertion_point, dist_to_new_labor, dist_to_next_labor)
+#     candidate_insertions : list of tuples or dicts
+#         Expected tuple structure:
+#         (driver, prev_labor_id, next_labor_id,
+#          dist_to_new_labor, dist_to_next_labor,
+#          feasible, downstream_shifts, would_arrive_next)
 #     selection_mode : str, optional
-#         Selection criterion:
+#         Criterion for selecting among feasible insertions:
 #         - "random": choose a random driver
 #         - "min_total_distance": minimize (dist_to_new_labor + dist_to_next_labor)
 #         - "min_dist_to_new_labor": minimize distance to the new labor
 #     random_state : int, optional
-#         For reproducibility when using random selection.
+#         For reproducibility in random selection.
 
 #     Returns
 #     -------
-#     selected_driver : str
-#         The chosen driver ID.
-#     insertion_point : int
-#         Where to insert the new labor in the driver's schedule.
+#     selected_driver : str or None
+#         ID of the chosen driver.
+#     insertion_point : tuple or None
+#         (prev_labor_id, next_labor_id) pair indicating insertion location.
 #     selection_df : pd.DataFrame
-#         Table summarizing all candidate metrics (for analysis/debugging).
+#         DataFrame summarizing all candidates and metrics.
 #     """
 
-#     if len(candidate_insertions) == 0:
+#     if not candidate_insertions:
 #         return None, None, pd.DataFrame()
 
-#     # Convert to DataFrame for easier computation
-#     selection_df = pd.DataFrame(candidate_insertions, columns=[
-#         "driver", "prev_labor_id", 'next_labor_id', "dist_to_new_labor", "dist_to_next_labor"
-#     ])
+#     # Normalize input to DataFrame
+#     columns = [
+#         "driver",
+#         "prev_labor_id",
+#         "next_labor_id",
+#         "dist_to_new_labor",
+#         "dist_to_next_labor",
+#         "feasible",
+#         "downstream_shifts",
+#         "would_arrive_next"
+#     ]
 
-#     # Replace None/NaN manually using np.where (bypasses .fillna())
-#     selection_df["dist_to_new_labor"] = np.where(
-#         selection_df["dist_to_new_labor"].isna(),
-#         0,
-#         selection_df["dist_to_new_labor"]
-#     ).astype(float)
+#     selection_df = pd.DataFrame(candidate_insertions, columns=columns[:len(candidate_insertions[0])])
 
-#     selection_df["dist_to_next_labor"] = np.where(
-#         selection_df["dist_to_next_labor"].isna(),
-#         0,
-#         selection_df["dist_to_next_labor"]
-#     ).astype(float)
+#     # Keep only feasible candidates (if 'feasible' column exists)
+#     if "feasible" in selection_df.columns:
+#         selection_df = selection_df[selection_df["feasible"] == True]
 
+#     if selection_df.empty:
+#         return None, None, pd.DataFrame(columns=columns)
+
+#     # Handle NaNs in distance columns safely
+#     for col in ["dist_to_new_labor", "dist_to_next_labor"]:
+#         if col in selection_df.columns:
+#             selection_df[col] = selection_df[col].fillna(0).astype(float)
+#         else:
+#             selection_df[col] = 0.0
+
+#     # Compute total distance
 #     selection_df["total_distance"] = (
 #         selection_df["dist_to_new_labor"] + selection_df["dist_to_next_labor"]
 #     )
@@ -980,94 +1115,314 @@ def filter_dfs_for_insertion(
 #         raise ValueError(f"Unknown selection_mode '{selection_mode}'")
 
 #     selected_driver = chosen_row["driver"]
-#     insertion_point = (chosen_row["prev_labor_id"], chosen_row['next_labor_id'])
+#     insertion_point = (
+#         chosen_row.get("prev_labor_id"),
+#         chosen_row.get("next_labor_id")
+#     )
 
 #     return selected_driver, insertion_point, selection_df
 
-def get_best_insertion(candidate_insertions, selection_mode="min_total_distance", random_state=None):
+
+def get_best_insertion(
+    candidate_insertions: List[Dict[str, Any]],
+    selection_mode: str = "min_total_distance",
+    random_state: Optional[int] = None
+) -> Tuple[Optional[Dict[str, Any]], Optional[pd.DataFrame]]:
     """
-    Selects the best driver among feasible insertion options.
+    Selects the best insertion plan among feasible options.
 
     Parameters
     ----------
-    candidate_insertions : list of tuples or dicts
-        Expected tuple structure:
-        (driver, prev_labor_id, next_labor_id,
-         dist_to_new_labor, dist_to_next_labor,
-         feasible, downstream_shifts, would_arrive_next)
+    candidate_insertions : list of dict
+        Each element is an insertion_plan produced by evaluate_driver_feasibility().
+        Must include at least:
+          - 'driver_id'
+          - 'dist_to_new_service'
+          - 'dist_to_next_labor'
+          - 'feasible' (optional but recommended)
+          - (others like downstream_shifts, new_moves, etc.)
     selection_mode : str, optional
-        Criterion for selecting among feasible insertions:
-        - "random": choose a random driver
-        - "min_total_distance": minimize (dist_to_new_labor + dist_to_next_labor)
-        - "min_dist_to_new_labor": minimize distance to the new labor
+        Criterion for selection:
+          - "min_total_distance" (default): minimize (dist_to_new_service + dist_to_next_labor)
+          - "min_dist_to_new_labor": minimize dist_to_new_service
+          - "random": choose randomly among feasible insertions
     random_state : int, optional
-        For reproducibility in random selection.
+        Random seed for reproducibility.
 
     Returns
     -------
-    selected_driver : str or None
-        ID of the chosen driver.
-    insertion_point : tuple or None
-        (prev_labor_id, next_labor_id) pair indicating insertion location.
-    selection_df : pd.DataFrame
-        DataFrame summarizing all candidates and metrics.
+    best_plan : dict or None
+        The chosen insertion_plan ready for commit_new_labor_insertion.
+    selection_df : pd.DataFrame or None
+        DataFrame summary of all feasible candidates (for diagnostics or logging).
     """
 
     if not candidate_insertions:
-        return None, None, pd.DataFrame()
+        return None, pd.DataFrame()
 
-    # Normalize input to DataFrame
-    columns = [
-        "driver",
-        "prev_labor_id",
-        "next_labor_id",
-        "dist_to_new_labor",
-        "dist_to_next_labor",
-        "feasible",
-        "downstream_shifts",
-        "would_arrive_next"
-    ]
+    # --- Convert to DataFrame for easy filtering / comparison ---
+    selection_records = []
+    for driver, plan in candidate_insertions:
+        selection_records.append({
+            "driver_id": plan.get("alfred"),
+            "prev_labor_id": plan.get("prev_labor_id"),
+            "next_labor_id": plan.get("next_labor_id"),
+            "dist_to_new_service": plan.get("dist_to_new_service", np.nan),
+            "dist_to_next_labor": plan.get("dist_to_next_labor", np.nan),
+            "feasible": plan.get("feasible", True)
+        })
 
-    selection_df = pd.DataFrame(candidate_insertions, columns=columns[:len(candidate_insertions[0])])
+    selection_df = pd.DataFrame(selection_records)
 
-    # Keep only feasible candidates (if 'feasible' column exists)
+    # --- Keep only feasible ones ---
     if "feasible" in selection_df.columns:
         selection_df = selection_df[selection_df["feasible"] == True]
-
     if selection_df.empty:
-        return None, None, pd.DataFrame(columns=columns)
+        return None, selection_df
 
-    # Handle NaNs in distance columns safely
-    for col in ["dist_to_new_labor", "dist_to_next_labor"]:
-        if col in selection_df.columns:
-            selection_df[col] = selection_df[col].fillna(0).astype(float)
-        else:
-            selection_df[col] = 0.0
+    # # --- Compute total distance ---
+    # selection_df["total_distance"] = (
+    #     selection_df["dist_to_new_service"].fillna(0).astype(float)
+    #     + selection_df["dist_to_next_labor"].fillna(0).astype(float)
+    # )
+    selection_df["dist_to_new_service"] = pd.to_numeric(selection_df["dist_to_new_service"], errors="coerce").fillna(0)
+    selection_df["dist_to_next_labor"] = pd.to_numeric(selection_df["dist_to_next_labor"], errors="coerce").fillna(0)
+    selection_df["total_distance"] = selection_df["dist_to_new_service"] + selection_df["dist_to_next_labor"]
 
-    # Compute total distance
-    selection_df["total_distance"] = (
-        selection_df["dist_to_new_labor"] + selection_df["dist_to_next_labor"]
-    )
-
-    # --- Selection logic ---
+    # --- Select best plan according to selection_mode ---
     if selection_mode == "random":
-        if random_state is not None:
-            random.seed(random_state)
-        chosen_row = selection_df.sample(1, random_state=random_state).iloc[0]
+        chosen_idx = (
+            selection_df.sample(1, random_state=random_state).index[0]
+            if not selection_df.empty else None
+        )
 
     elif selection_mode == "min_dist_to_new_labor":
-        chosen_row = selection_df.loc[selection_df["dist_to_new_labor"].idxmin()]
+        chosen_idx = selection_df["dist_to_new_service"].idxmin()
 
     elif selection_mode == "min_total_distance":
-        chosen_row = selection_df.loc[selection_df["total_distance"].idxmin()]
+        chosen_idx = selection_df["total_distance"].idxmin()
 
     else:
-        raise ValueError(f"Unknown selection_mode '{selection_mode}'")
+        raise ValueError(f"Unknown selection_mode: {selection_mode}")
 
-    selected_driver = chosen_row["driver"]
-    insertion_point = (
-        chosen_row.get("prev_labor_id"),
-        chosen_row.get("next_labor_id")
+    if chosen_idx is None:
+        return None, selection_df
+
+    # --- Retrieve the corresponding plan directly ---
+    driver, best_plan = candidate_insertions[chosen_idx]
+
+    return driver, best_plan, selection_df
+
+
+''' Updating dataframe functions'''
+def commit_new_labor_insertion():
+    pass
+
+
+
+
+from typing import Tuple, Dict, Any, List, Optional
+import pandas as pd
+import numpy as np
+from datetime import datetime, timedelta
+
+
+def _ensure_datetime_col(df: pd.DataFrame, col: str) -> None:
+    """Ensure column is datetime dtype (inplace)."""
+    if col not in df.columns:
+        return
+    if not pd.api.types.is_datetime64_any_dtype(df[col]):
+        df[col] = pd.to_datetime(df[col], errors="coerce")
+
+
+
+def commit_new_labor_insertion(
+    labors_df: pd.DataFrame,
+    moves_df: pd.DataFrame,
+    driver: str,
+    insertion_plan: Dict[str, Any],
+    new_labor: pd.Series
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Commit a new labor insertion into the global labors and moves DataFrames.
+
+    This function integrates the new labor and its corresponding triplet of
+    move records (FREE_TIME, DRIVER_MOVE, LABOR) into the driver’s schedule,
+    along with any downstream updates from the insertion plan.
+
+    All timing and distance values are assumed to be precomputed and
+    validated by `evaluate_driver_feasibility`.
+
+    Parameters
+    ----------
+    labors_df : pd.DataFrame
+        Global labors dataframe containing all scheduled labors.
+    moves_df : pd.DataFrame
+        Global moves dataframe containing all driver movement rows.
+    insertion_plan : dict
+        Output from `evaluate_driver_feasibility`, containing:
+          - 'driver_id'
+          - 'new_labor_id'
+          - 'new_labor_timing' (dict with arrival/finish)
+          - 'new_moves' (DataFrame from `_build_new_moves_block`)
+          - 'updated_labors' (list of dicts with timing adjustments)
+          - 'downstream_shifts' (list of dicts for triplet re-timing)
+          - 'first_assignment' (bool)
+    new_labor : pd.Series
+        Row from `labors_df` corresponding to the labor being inserted.
+
+    Returns
+    -------
+    (labors_df_new, moves_df_new)
+        Updated and re-sorted copies of the input DataFrames.
+    """
+
+    # ============================================================
+    # 1️⃣ BASIC EXTRACTION
+    # ============================================================
+    # driver = insertion_plan["driver_id"]
+    new_labor_id = new_labor['labor_id']
+    new_moves_df = insertion_plan.get("new_moves", pd.DataFrame())
+    updated_labors = insertion_plan.get("updated_labors", [])
+    downstream_shifts = insertion_plan.get("downstream_shifts", [])
+    timing = insertion_plan.get("new_labor_timing", {})
+
+    arrival_time = timing.get("arrival_time")
+    finish_time = timing.get("finish_time")
+
+    # ============================================================
+    # 2️⃣ ADD NEW LABOR TO labors_df
+    # ============================================================
+    labors_new = labors_df.copy()
+
+    # clone and fill the new labor row
+    new_lab_row = new_labor.copy()
+    new_lab_row["assigned_driver"] = driver
+    new_lab_row["actual_start"] = arrival_time
+    new_lab_row["actual_end"] = finish_time
+
+    # align columns and append
+    for col in labors_new.columns:
+        if col not in new_lab_row.index:
+            new_lab_row[col] = np.nan
+    new_lab_row = new_lab_row[labors_new.columns]
+    labors_new = pd.concat([labors_new, pd.DataFrame([new_lab_row])], ignore_index=True)
+
+    # ============================================================
+    # 3️⃣ APPEND NEW MOVES BLOCK
+    # ============================================================
+    moves_new = moves_df.copy()
+
+    if not new_moves_df.empty:
+        # Ensure schema alignment
+        for c in moves_new.columns:
+            if c not in new_moves_df.columns:
+                new_moves_df[c] = np.nan
+
+        new_moves_df = new_moves_df[moves_new.columns]
+        moves_new = pd.concat([moves_new, new_moves_df], ignore_index=True)
+
+    # ============================================================
+    # 4️⃣ APPLY UPDATED LABOR TIMINGS (Immediate neighbor)
+    # ============================================================
+    for upd in updated_labors:
+        lid = str(upd["labor_id"])
+        new_start = upd.get("new_start_time")
+        new_free_end = upd.get("new_free_time")
+
+        mask_prefix = moves_new["labor_context_id"].astype(str).str.startswith(lid)
+        if not mask_prefix.any():
+            continue
+
+        free_mask = mask_prefix & moves_new["labor_context_id"].str.endswith("_free")
+        labor_mask = mask_prefix & moves_new["labor_context_id"].str.endswith("_labor")
+
+        if free_mask.any():
+            moves_new.loc[free_mask, "actual_end"] = new_free_end
+            moves_new.loc[free_mask, "duration_min"] = (
+                (moves_new.loc[free_mask, "actual_end"] - moves_new.loc[free_mask, "actual_start"])
+                .dt.total_seconds() / 60
+            )
+
+        if labor_mask.any():
+            moves_new.loc[labor_mask, "actual_start"] = new_start
+            moves_new.loc[labor_mask, "duration_min"] = (
+                (moves_new.loc[labor_mask, "actual_end"] - moves_new.loc[labor_mask, "actual_start"])
+                .dt.total_seconds() / 60
+            )
+
+    # ============================================================
+    # 5️⃣ APPLY DOWNSTREAM SHIFTS (Full triplet timing rewrites)
+    # ============================================================
+    for shift_entry in downstream_shifts:
+        for labor_key, triplet in shift_entry.items():
+            if not isinstance(triplet, list) or len(triplet) != 3:
+                continue
+
+            free_times, move_times, labor_times = triplet
+            mask = moves_new["labor_context_id"].astype(str).str.startswith(str(labor_key))
+
+            if not mask.any():
+                continue
+
+            # Apply each timing
+            free_mask = mask & moves_new["labor_context_id"].str.endswith("_free")
+            move_mask = mask & moves_new["labor_context_id"].str.endswith("_move")
+            labor_mask = mask & moves_new["labor_context_id"].str.endswith("_labor")
+
+            # FREE
+            if free_mask.any():
+                moves_new.loc[free_mask, ["actual_start", "actual_end"]] = [
+                    free_times["start"], free_times["end"]
+                ]
+                moves_new.loc[free_mask, "duration_min"] = (
+                    (moves_new.loc[free_mask, "actual_end"] - moves_new.loc[free_mask, "actual_start"])
+                    .dt.total_seconds() / 60
+                )
+
+            # MOVE
+            if move_mask.any():
+                moves_new.loc[move_mask, ["actual_start", "actual_end"]] = [
+                    move_times["start"], move_times["end"]
+                ]
+                moves_new.loc[move_mask, "duration_min"] = (
+                    (moves_new.loc[move_mask, "actual_end"] - moves_new.loc[move_mask, "actual_start"])
+                    .dt.total_seconds() / 60
+                )
+
+            # LABOR
+            if labor_mask.any():
+                moves_new.loc[labor_mask, ["actual_start", "actual_end"]] = [
+                    labor_times["start"], labor_times["end"]
+                ]
+                moves_new.loc[labor_mask, "duration_min"] = (
+                    (moves_new.loc[labor_mask, "actual_end"] - moves_new.loc[labor_mask, "actual_start"])
+                    .dt.total_seconds() / 60
+                )
+
+    # ============================================================
+    # 6️⃣ FINAL SORTING & CLEANUP
+    # ============================================================
+    # Ensure datetime dtype consistency
+    for col in ["actual_start", "actual_end"]:
+        if col in moves_new.columns:
+            moves_new[col] = pd.to_datetime(moves_new[col], errors="coerce")
+    for col in ["actual_start", "actual_end"]:
+        if col in labors_new.columns:
+            labors_new[col] = pd.to_datetime(labors_new[col], errors="coerce")
+
+    # Sort moves by driver + time
+    moves_new = (
+        moves_new.sort_values(["assigned_driver", "schedule_date", "actual_start"], na_position="last")
+        .reset_index(drop=True)
     )
 
-    return selected_driver, insertion_point, selection_df
+    # Sort labors by time
+    labors_new = (
+        labors_new.sort_values(["assigned_driver", "schedule_date", "actual_start"], na_position="last")
+        .reset_index(drop=True)
+    )
+
+    return labors_new, moves_new
+
+

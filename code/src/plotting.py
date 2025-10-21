@@ -931,3 +931,130 @@ def plot_service_driver_distance(labors_hist_df: pd.DataFrame,
     )
     fig.update_xaxes(tickangle=-45)
     fig.show()
+
+
+def prepare_labor_data(labors_static_df, labors_dynamic_df):
+    """
+    Combine static and dynamic labor dataframes, normalize columns, 
+    and return the merged dataframe.
+    """
+    # Add a label column to distinguish static vs dynamic
+    labors_static_df = labors_static_df.copy()
+    labors_dynamic_df = labors_dynamic_df.copy()
+    
+    labors_static_df["labor_type"] = "Static"
+    labors_dynamic_df["labor_type"] = "Dynamic"
+
+    # Combine both
+    all_labors_df = pd.concat([labors_static_df, labors_dynamic_df], ignore_index=True)
+    all_labors_df["schedule_date"] = pd.to_datetime(all_labors_df["schedule_date"])
+
+    return all_labors_df
+
+
+def plot_labors(all_labors_df, selected_date_str):
+    """
+    Filter and plot labors by city and type for a given date or all dates.
+    """
+    # Handle 'ALL' selection
+    if selected_date_str == "ALL":
+        filtered = all_labors_df[
+            all_labors_df["labor_category"] == "VEHICLE_TRANSPORTATION"
+        ]
+        title_date = "All Dates"
+    else:
+        selected_date = pd.to_datetime(selected_date_str).date()
+        filtered = all_labors_df[
+            (all_labors_df["schedule_date"].dt.date == selected_date)
+            & (all_labors_df["labor_category"] == "VEHICLE_TRANSPORTATION")
+        ]
+        title_date = selected_date_str
+
+    # Count per city and labor_type
+    counts = (
+        filtered.groupby(["city", "labor_type"])
+        .size()
+        .reset_index(name="count")
+    )
+
+    # Aesthetic color palette
+    colors = ["#4F6D7A", "#E27D60"]  # muted teal and coral
+
+    # Plot
+    fig = px.bar(
+        counts,
+        x="city",
+        y="count",
+        color="labor_type",
+        barmode="group",
+        color_discrete_sequence=colors,
+        title=f"Static vs Dynamic Labors ({title_date})",
+        labels={"count": "Number of Labors", "city": "City", "labor_type": "Type"},
+        template="plotly_white",
+    )
+
+    fig.update_layout(
+        title_font_size=18,
+        title_x=0.5,
+        bargap=0.3,
+        legend_title_text="Labor Type",
+        font=dict(size=13),
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)"
+    )
+
+    fig.show()
+
+
+def make_histograms(df, created_col='created_at', schedule_col='schedule_date', unit='hours'):
+    """
+    Internal helper to build two histograms from the given dataframe.
+    """
+    # --- Safety checks ---
+    if created_col not in df.columns or schedule_col not in df.columns:
+        raise ValueError(f"Columns '{created_col}' and/or '{schedule_col}' not found in dataframe.")
+    if unit not in ['hours', 'minutes']:
+        raise ValueError("unit must be either 'hours' or 'minutes'")
+
+    # --- 1. Distribution of order creation times (time of day) ---
+    created_local = df[created_col].dt.tz_convert(df[created_col].dt.tz)
+    created_hours = created_local.dt.hour + created_local.dt.minute / 60.0
+
+    fig1 = px.histogram(
+        x=created_hours,
+        nbins=48,
+        labels={'x': 'Hour of Day (local time)', 'y': 'Number of Orders'},
+        title='Distribution of Order Creation Times (Local Time)',
+        color_discrete_sequence=['#5DADE2'],  # soft blue
+    )
+    fig1.update_layout(
+        bargap=0.05,
+        xaxis=dict(
+            tickmode='array',
+            tickvals=list(range(0, 25, 2)),
+            title='Hour of Day (0–24)',
+        ),
+        yaxis_title='Count',
+        template='plotly_white',
+        title_x=0.5
+    )
+
+    # --- 2. Time difference between creation and schedule ---
+    delta = df[schedule_col] - df[created_col]
+    delta_hours = delta.dt.total_seconds() / 3600
+    delta_vals = delta_hours if unit == 'hours' else delta_hours * 60
+    
+    fig2 = px.histogram(
+        x=delta_vals,
+        nbins=50,
+        labels={'x': f'Time Between Creation and Schedule ({unit})', 'y': 'Number of Orders'},
+        title=f'Distribution of Time Between Creation and Schedule ({unit})',
+        color_discrete_sequence=['#F1948A'],  # soft coral
+    )
+    fig2.update_layout(
+        bargap=0.05,
+        template='plotly_white',
+        title_x=0.5
+    )
+
+    return fig1, fig2

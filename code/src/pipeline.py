@@ -1,14 +1,10 @@
 import pandas as pd
 
-from .distance_utils import distance # type: ignore
-from .data_load import load_tables # type: ignore
-from .filtering import filter_labors_by_date, filter_labors_by_city, filter_labores # type: ignore
-from .metrics import collect_vt_metrics_range, show_day_report_dayonly, compute_indicators # type: ignore
-from .preprocessing import remap_to_base_date, build_services_map_df, process_group # type: ignore
-from .plotting import plot_results # type: ignore
+from .filtering import filter_labors_by_city, filter_labores
+from .preprocessing import remap_to_base_date, build_services_map_df, process_group
 from .config import *
 from .experimentation_config import max_drivers
-from .algorithms import remove_drivers, compute_avg_times, run_assignment_algorithm, init_drivers # type: ignore
+from .offline_algorithms import run_assignment_algorithm
 from .utils import get_city_name_from_code
 
 # ——————————————————————————
@@ -71,11 +67,6 @@ def run_city_pipeline(  city_code,
 
     df_cleaned_template = filter_labores(df_cleaned_template, hour_threshold=0)
     # avg_times_map = compute_avg_times(df_dist)
-
-    #TODO: DEPENDING ON WHICH 
-    # max_drivers_num = max_drivers.get(instance, None)
-    # if max_drivers_num:
-    #     max_drivers_num = max_drivers_num[base_day.day - initial_day]
 
     # 7. Ejecutar el algorithmo de assignación
     df_result, df_moves, n_drivers = run_assignment_algorithm(  df_cleaned_template=df_cleaned_template,

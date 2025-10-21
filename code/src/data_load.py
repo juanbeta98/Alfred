@@ -104,8 +104,12 @@ def load_tables(
                 .dt.tz_convert(tz)   # <- conversión a la zona horaria de destino
             )
 
-        if "city" in labors_raw_df.columns:
-            labors_raw_df["city"] = labors_raw_df["city"].astype(str)
+        for col in ['city', 'alfred', 'service_id', 'labor_id']:
+            if col in labors_raw_df.columns:
+                labors_raw_df[col] = (
+                    labors_raw_df[col]
+                    .apply(lambda x: '' if pd.isna(x) else str(int(float(x))))
+                )
 
     # labors_raw_df = _order_labor_df(labors_raw_df, assignment_type='historic')
     
@@ -167,70 +171,69 @@ def upload_cities_table(data_path: str, city_codes: list = []) -> pd.DataFrame:
     return filtered_df[["cod_ciudad", "ciudad", "cod_depto", "depto"]].reset_index(drop=True)
 
 
-def load_artificial_instance(
-    data_path, 
-    instance, 
-    labors_raw_df, 
-    tz: str = "America/Bogota"
-) -> pd.DataFrame:
-    """
-    Load the artificial instance from CSV and align its dtypes with a reference dataframe.
+# def load_artificial_instance(
+#     data_path, 
+#     instance, 
+#     labors_raw_df, 
+#     tz: str = "America/Bogota"
+# ) -> pd.DataFrame:
+#     """
+#     Load the artificial instance from CSV and align its dtypes with a reference dataframe.
 
-    Parameters
-    ----------
-    data_path : str
-        Path to the folder containing the CSV (expects `data_clean/labors_art_df.csv`).
-    instance : str
-        Name of the artificial instance folder.
-    labors_raw_df : pd.DataFrame
-        Reference dataframe with correct dtypes.
-    tz : str, optional
-        Target timezone for datetime columns. Default = "America/Bogota".
+#     Parameters
+#     ----------
+#     data_path : str
+#         Path to the folder containing the CSV (expects `data_clean/labors_art_df.csv`).
+#     instance : str
+#         Name of the artificial instance folder.
+#     labors_raw_df : pd.DataFrame
+#         Reference dataframe with correct dtypes.
+#     tz : str, optional
+#         Target timezone for datetime columns. Default = "America/Bogota".
 
-    Returns
-    -------
-    labors_art_df : pd.DataFrame
-        Artificial instance dataframe with dtypes aligned to `labors_raw_df`.
-    """
-    # Load CSV
-    labors_art_df = pd.read_csv(f"{data_path}/instances/artif_inst/{instance}/labors_{instance}_df.csv")
+#     Returns
+#     -------
+#     labors_art_df : pd.DataFrame
+#         Artificial instance dataframe with dtypes aligned to `labors_raw_df`.
+#     """
+#     # Load CSV
+#     labors_art_df = pd.read_csv(f"{data_path}/instances/artif_inst/{instance}/labors_{instance}_df.csv")
 
-    # Align dtypes with reference dataframe
-    for col in labors_raw_df.columns:
-        if col in labors_art_df.columns:
-            if col == "city":
-                # Force string representation
-                labors_art_df[col] = labors_art_df[col].astype(str)
+#     # Align dtypes with reference dataframe
+#     for col in labors_raw_df.columns:
+#         if col in labors_art_df.columns:
+#             if col == "city":
+#                 # Force string representation
+#                 labors_art_df[col] = labors_art_df[col].astype(str)
+#             else:
+#                 try:
+#                     labors_art_df[col] = labors_art_df[col].astype(labors_raw_df[col].dtype)
 
-            else:
-                try:
-                    labors_art_df[col] = labors_art_df[col].astype(labors_raw_df[col].dtype)
+#                 except Exception:
+#                     # If conversion fails, try datetime
+#                     if np.issubdtype(labors_raw_df[col].dtype, np.datetime64):
+#                         labors_art_df[col] = pd.to_datetime(labors_art_df[col], errors="coerce", utc=True)
+#                     # otherwise leave as is
 
-                except Exception:
-                    # If conversion fails, try datetime
-                    if np.issubdtype(labors_raw_df[col].dtype, np.datetime64):
-                        labors_art_df[col] = pd.to_datetime(labors_art_df[col], errors="coerce", utc=True)
-                    # otherwise leave as is
+#     # Force timezone normalization for known datetime columns
+#     datetime_cols = [
+#         "labor_created_at",
+#         "labor_start_date",
+#         "labor_end_date",
+#         "created_at",
+#         "schedule_date",
+#         "actual_start",
+#         "actual_end",
+#     ]
 
-    # Force timezone normalization for known datetime columns
-    datetime_cols = [
-        "labor_created_at",
-        "labor_start_date",
-        "labor_end_date",
-        "created_at",
-        "schedule_date",
-        "actual_start",
-        "actual_end",
-    ]
+#     for col in datetime_cols:
+#         if col in labors_art_df.columns:
+#             labors_art_df[col] = (
+#                 pd.to_datetime(labors_art_df[col], errors="coerce", utc=True)
+#                   .dt.tz_convert(tz)
+#             )
 
-    for col in datetime_cols:
-        if col in labors_art_df.columns:
-            labors_art_df[col] = (
-                pd.to_datetime(labors_art_df[col], errors="coerce", utc=True)
-                  .dt.tz_convert(tz)
-            )
-
-    return labors_art_df
+#     return labors_art_df
 
 
 def load_instance(
@@ -264,15 +267,19 @@ def load_instance(
     # Align dtypes with reference dataframe
     for col in labors_raw_df.columns:
         if col in labors_art_df.columns:
-            if col == "city":
-                # Force string representation
-                labors_art_df[col] = labors_art_df[col].astype(str)
+
+            if col in ['city', 'alfred', 'service_id', 'labor_id']:
+                labors_art_df[col] = (
+                    labors_art_df[col]
+                    .apply(lambda x: '' if pd.isna(x) else str(int(float(x))))
+                )
 
             else:
                 try:
                     labors_art_df[col] = labors_art_df[col].astype(labors_raw_df[col].dtype)
 
                 except Exception:
+                    print(col)
                     # If conversion fails, try datetime
                     if np.issubdtype(labors_raw_df[col].dtype, np.datetime64):
                         labors_art_df[col] = pd.to_datetime(labors_art_df[col], errors="coerce", utc=True)
@@ -303,8 +310,18 @@ def load_instance(
 
 def load_online_instance(data_path, instance, labors_raw_df):
     labors_real_df = load_instance(data_path, instance, labors_raw_df)
-    labors_static_df = load_instance(data_path, instance, labors_raw_df, online_type='_static')
-    labors_dynamic_df = load_instance(data_path, instance, labors_raw_df, online_type='_dynamic')
+    labors_static_df = load_instance(
+        data_path, 
+        instance, 
+        labors_raw_df, 
+        online_type='_static'
+    )
+    labors_dynamic_df = load_instance(
+        data_path, 
+        instance, 
+        labors_raw_df, 
+        online_type='_dynamic'
+        ).sort_values(['created_at', 'schedule_date']).reset_index(drop=True)
 
     return labors_real_df, labors_static_df, labors_dynamic_df
 
@@ -321,7 +338,8 @@ def load_distances(data_path, distance_type, instance, distance_method='precalce
 
 def load_directorio_hist_df(data_path, instance):
     directorio_hist_df = pd.read_csv(f'{data_path}/instances/{instance_map[instance]}_inst/{instance}/directorio_hist_df.csv')
-    directorio_hist_df['city'] = directorio_hist_df['city'].astype(str)
+    for col in ['city', 'alfred']:
+        directorio_hist_df[col] = directorio_hist_df[col].astype(int).astype(str)
 
     return directorio_hist_df
 

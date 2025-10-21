@@ -61,7 +61,7 @@ def distance(p1, p2, method, dist_dict=None, timeout=5, **kwargs):
         dφ = math.radians(lat2 - lat1)
         dλ = math.radians(lon2 - lon1)
         a = math.sin(dφ/2)**2 + math.cos(φ1)*math.cos(φ2)*math.sin(dλ/2)**2
-        return 2 * 6371 * math.atan2(math.sqrt(a), math.sqrt(1-a)), {}
+        return 2 * 6371 * math.atan2(math.sqrt(a), math.sqrt(1-a)), dist_dict
 
     if method == 'osrm':
         coords = f"{lon1},{lat1};{lon2},{lat2}"

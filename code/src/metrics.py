@@ -9,7 +9,7 @@ from IPython.display import display
 from typing import Tuple, Dict
 
 from .data_load import _order_labor_df
-from .algorithms import init_drivers
+from .offline_algorithms import init_drivers
 from .distance_utils import distance
 from .experimentation_config import instance_map
 
