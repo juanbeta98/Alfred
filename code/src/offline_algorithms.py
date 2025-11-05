@@ -21,10 +21,9 @@ def run_assignment_algorithm(
     day_str: str, 
     ciudad: str,
     assignment_type: str = 'algorithm',
-    dist_dict = None,
     dist_method = 'haversine',
-    alpha = 1, 
-    max_drivers = None,
+    dist_dict = None,
+    alpha = 1,
     **kwargs
 ) -> Tuple[pd.DataFrame, pd.DataFrame, int]:
     """
@@ -44,8 +43,7 @@ def run_assignment_algorithm(
     distances = [0] * len(df_cleaned_template)
     service_end_times = {}
 
-    drivers = init_drivers_wrapper(df_sorted, directorio_df, ciudad, assignment_type=assignment_type, 
-                                   max_drivers=max_drivers, **kwargs)
+    drivers = init_drivers_wrapper(df_sorted, directorio_df, ciudad, assignment_type=assignment_type, **kwargs)
 
     # --- Lógica de asignación principal ---
     for _, row in df_sorted.iterrows():
@@ -129,7 +127,7 @@ def run_assignment_algorithm(
                                       ALFRED_SPEED, ciudad, dist_dict=dist_dict, 
                                       assignment_type=assignment_type, **kwargs)
 
-    return df_result, df_moves, len(drivers)
+    return df_result, df_moves
 
 
 '''
@@ -139,10 +137,10 @@ def get_candidate_drivers(
     drivers: Dict[str, Dict], 
     row: pd.Series,
     prev_end: pd.Timestamp, 
-    TIEMPO_PREVIO: int,
-    TIEMPO_GRACIA: int,
-    ALFRED_SPEED: float,
-    method: str,
+    tiempo_previo: int,
+    tiempo_gracia: int,
+    alfred_speed: float,
+    dist_method: str,
     dist_dict: dict,
     **kwargs
 ) -> List[Dict[str, Any]]:
@@ -174,8 +172,8 @@ def get_candidate_drivers(
     kwargs['return_dist_dict'] = True
     
     sched = row['schedule_date']
-    early = prev_end or (sched - timedelta(minutes=TIEMPO_PREVIO))
-    late  = (prev_end + timedelta(minutes=TIEMPO_GRACIA)) if prev_end else (sched + timedelta(minutes=TIEMPO_GRACIA))
+    early = prev_end or (sched - timedelta(minutes=tiempo_previo))
+    late  = (prev_end + timedelta(minutes=tiempo_gracia)) if prev_end else (sched + timedelta(minutes=tiempo_gracia))
     
     cands = []
     for name, drv in drivers.items():
@@ -184,8 +182,8 @@ def get_candidate_drivers(
             av = pd.Timestamp(datetime.combine(av.date(), drv['work_start']), tz=av.tz)
 
         # For getting candidate drivers always use the haversine formula, otherwise it get's to heavy
-        dkm, dist_dict = distance(drv['position'], row['map_start_point'], method=method, dist_dict=dist_dict, **kwargs)
-        arr = av + timedelta(minutes=(0 if math.isnan(dkm) else dkm/ALFRED_SPEED*60))
+        dkm, dist_dict = distance(drv['position'], row['map_start_point'], method=dist_method, dist_dict=dist_dict, **kwargs)
+        arr = av + timedelta(minutes=(0 if math.isnan(dkm) else dkm/alfred_speed*60))
 
         if arr <= late:
             cands.append({'drv': name, 'arrival': arr, 'dist_km': dkm})
@@ -258,8 +256,6 @@ def init_drivers_wrapper(
         return init_drivers(df_labors, directorio_df, ciudad, ignore_schedule=True, max_drivers=max_drivers)
     elif driver_init_mode == 'historic_directory':
         return init_historic_drivers(df_labors, directorio_df)
-    # elif assignment_type == "historic":
-    #     return get_historic_drivers(df_labors)
     else:
         raise ValueError(f"Unknown driver initialization mode: {driver_init_mode}")
 
@@ -366,7 +362,11 @@ def init_historic_drivers(
         position = pos_list[0]
 
         # Disponibilidad: medianoche de la fecha mínima
-        hora_inicio = time(0, 0, 0)
+        if 'available_time' in df_driver.columns:
+            hora_inicio = df_driver['available_time'].dropna().unique().tolist()[0].time()
+            # hora_inicio = datetime.fromtimestamp(hora_inicio).time()
+        else:
+            hora_inicio = time(0, 0, 0)
         disponibilidad = datetime.combine(first_date, hora_inicio)
 
         conductores[driver] = {
@@ -394,7 +394,7 @@ def assign_task_to_driver(
     start_point: str, 
     end_point: str,
     is_last_in_service: bool, 
-    TIEMPO_ALISTAR: int,
+    tiempo_alistar: int,
     tiempo_finalizacion: int, 
     vehicle_speed: float,
     method: str, 
@@ -410,7 +410,7 @@ def assign_task_to_driver(
     """
     astart = max(arrival, early)
     dist_km, _ = distance(start_point, end_point, method=method, dist_dict=dist_dict, **kwargs)
-    dur = TIEMPO_ALISTAR + (0 if math.isnan(dist_km) else dist_km/vehicle_speed*60) \
+    dur = tiempo_alistar + (0 if math.isnan(dist_km) else dist_km/vehicle_speed*60) \
           + (tiempo_finalizacion if not is_last_in_service else 0)
     aend = astart + timedelta(minutes=dur)
 
@@ -493,9 +493,9 @@ def get_driver_wrapper(
     drivers: Dict[str, Dict],
     row: pd.Series,
     prev_end: pd.Timestamp,
-    TIEMPO_PREVIO: int,
-    TIEMPO_GRACIA: int,
-    ALFRED_SPEED: float,
+    tiempo_previo: int,
+    tiempo_gracia: int,
+    alfred_speed: float,
     dist_method: str,
     dist_dict: dict,
     ALPHA: float,
@@ -540,18 +540,28 @@ def get_driver_wrapper(
 
     if assignment_type == 'historic':
         driver, updated_dist_dict = get_historic_driver(
-            drivers, row, prev_end,
-            TIEMPO_PREVIO, TIEMPO_GRACIA,
-            ALFRED_SPEED, dist_method, dist_dict,
+            drivers=drivers, 
+            row=row, 
+            prev_end=prev_end,
+            tiempo_previo=tiempo_previo, 
+            tiempo_gracia=tiempo_gracia,
+            alfred_speed=alfred_speed, 
+            dist_method=dist_method, 
+            dist_dict=dist_dict,
             **kwargs
         )
         return driver, updated_dist_dict
     elif assignment_type == 'algorithm':
         candidate_dist_method = 'haversine'
         cands, updated_dist_dict = get_candidate_drivers(
-            drivers, row, prev_end,
-            TIEMPO_PREVIO, TIEMPO_GRACIA,
-            ALFRED_SPEED, candidate_dist_method, dist_dict,
+            drivers=drivers, 
+            row=row, 
+            prev_end=prev_end,
+            tiempo_previo=tiempo_previo, 
+            tiempo_gracia=tiempo_gracia,
+            alfred_speed=alfred_speed, 
+            dist_method=candidate_dist_method, 
+            dist_dict=dist_dict,
             **kwargs
         )
         return select_from_candidates(cands, ALPHA), updated_dist_dict
@@ -563,10 +573,10 @@ def get_historic_driver(
     drivers: Dict[str, Dict], 
     row: pd.Series, 
     prev_end: pd.Timestamp, 
-    TIEMPO_PREVIO: int,
-    TIEMPO_GRACIA: int,
-    ALFRED_SPEED: float, 
-    method: str, 
+    tiempo_previo: int,
+    tiempo_gracia: int,
+    alfred_speed: float, 
+    dist_method: str, 
     dist_dict: dict,
     **kwargs
 ) -> Dict[str, Any]:
@@ -609,8 +619,8 @@ def get_historic_driver(
     sched = row['schedule_date']
 
     # Ventana de tiempo (igual que en get_candidate_drivers)
-    early = prev_end or (sched - timedelta(minutes=TIEMPO_PREVIO))
-    late  = (prev_end + timedelta(minutes=TIEMPO_GRACIA)) if prev_end else (sched + timedelta(minutes=TIEMPO_GRACIA))
+    early = prev_end or (sched - timedelta(minutes=tiempo_previo))
+    late  = (prev_end + timedelta(minutes=tiempo_gracia)) if prev_end else (sched + timedelta(minutes=tiempo_gracia))
 
     # Disponibilidad del conductor
     av = drv['available']
@@ -619,11 +629,11 @@ def get_historic_driver(
 
     # Distancia hasta el punto inicial de la labor
     kwargs['return_dist_dict'] = True
-    dkm, dist_dict = distance(drv['position'], row['map_start_point'], method=method, 
+    dkm, dist_dict = distance(drv['position'], row['map_start_point'], method=dist_method, 
                    dist_dict=dist_dict, **kwargs)
 
     # Tiempo de viaje en minutos
-    travel_min = 0 if math.isnan(dkm) else dkm / ALFRED_SPEED * 60
+    travel_min = 0 if math.isnan(dkm) else dkm / alfred_speed * 60
 
     # Hora de llegada
     arrival = av + timedelta(minutes=travel_min)

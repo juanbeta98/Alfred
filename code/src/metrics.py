@@ -187,7 +187,7 @@ def vt_metrics(
     vt_count = int(len(df_vt))
 
     if alfred_col:
-        alfred_ids = sorted(df_day[alfred_col].dropna().unique().tolist())
+        alfred_ids = sorted(x for x in df_day[alfred_col].dropna().unique() if x != '')
         num_drivers = len(alfred_ids)
     else:
         alfred_ids, num_drivers = [], 0
@@ -785,33 +785,10 @@ def collect_hist_baseline_dfs(
     -------
         results_df (pd.DataFrame), moves_df (pd.DataFrame)
     """
-    all_results = []
-    all_moves   = []
-
-    for fecha in fecha_list:
-        upload_path = f"{data_path}/resultados/alfred_baseline/{instance}/{distance_method}/res_hist_{fecha}.pkl"
+    upload_path = f"{data_path}/resultados/online_operation/{instance}/{distance_method}/res_hist.pkl"
         
-        with open(upload_path, "rb") as f:
-            res = pickle.load(f)  # dict: {city: (df_cleaned, df_moves, n_drivers)}
-
-        for city, (df_cleaned, df_moves, n_drivers) in res.items():
-            # --- df_cleaned records ---
-            if df_cleaned is not None and not df_cleaned.empty:
-                tmp = df_cleaned.copy()
-                tmp["city"] = city
-                tmp["date"] = fecha
-                tmp["n_drivers"] = n_drivers
-                all_results.append(tmp)
-
-            # --- df_moves records ---
-            if df_moves is not None and not df_moves.empty:
-                tmpm = df_moves.copy()
-                tmpm["city"] = city
-                tmpm["date"] = fecha
-                all_moves.append(tmpm)
-
-    results_df = pd.concat(all_results, ignore_index=True) if all_results else pd.DataFrame()
-    moves_df   = pd.concat(all_moves, ignore_index=True) if all_moves else pd.DataFrame()
+    with open(upload_path, "rb") as f:
+        results_df, moves_df = pickle.load(f)
 
     if not results_df.empty:
         results_df = results_df.sort_values(["city", "date", "service_id", "labor_id"])
@@ -828,7 +805,6 @@ def collect_hist_baseline_dfs(
         
     ]
     datetime_cols += ['historic_start', 'historic_end']
-
     for df in (results_df, moves_df):
         for col in datetime_cols:
             if col in df.columns:
@@ -981,12 +957,6 @@ def collect_results_from_dicts(
     results_df = pd.concat(all_results, ignore_index=True) if all_results else pd.DataFrame()
     moves_df   = pd.concat(all_moves, ignore_index=True) if all_moves else pd.DataFrame()
 
-    # Ordenamiento
-    if not results_df.empty:
-        results_df = results_df.sort_values(["city", "date", "service_id", "labor_id"])
-    if not moves_df.empty:
-        moves_df = moves_df.sort_values(["city", "date", "service_id", "labor_id"])
-
     # Normalize datetime columns to tz
     datetime_cols = [
         "labor_created_at",
@@ -1009,6 +979,23 @@ def collect_results_from_dicts(
                 )
 
     return results_df, moves_df
+
+
+def concat_run_results(run_results: list):
+    all_labors = pd.DataFrame()
+    all_moves = pd.DataFrame()
+
+    for res in run_results: 
+        all_labors = pd.concat([all_labors, res[0]])
+        all_moves = pd.concat([all_moves, res[1]])
+
+    # Ordenamiento
+    if not all_labors.empty:
+        all_labors = all_labors.sort_values(["city", "date", "service_id", "labor_id"])
+    if not all_moves.empty:
+        all_moves = all_moves.sort_values(["city", "date", "service_id", "labor_id"])
+
+    return all_labors, all_moves
 
 
 def compute_metrics_with_moves(
@@ -1065,9 +1052,14 @@ def compute_metrics_with_moves(
     )
 
     # 2. Aggregate driver movement distance
-    df_moves_city = moves_df[moves_df["city"] == city].copy()
+    # --- Filtrar por ciudad si se especifica ---
+    # Convertir ambos a string para evitar errores de comparación por tipo.
+    if city is not None and 'city' in moves_df.columns:
+        moves_df['city'] = moves_df['city'].astype(str)
+        city = str(city)
+        moves_df = moves_df[moves_df['city'] == city]
 
-    df_driver_moves = df_moves_city[df_moves_city["labor_category"] == "DRIVER_MOVE"].copy()
+    df_driver_moves = moves_df[moves_df["labor_category"] == "DRIVER_MOVE"].copy()
     if "distance_km" not in df_driver_moves.columns:
         df_driver_moves["distance_km"] = df_driver_moves.apply(
             lambda r: distance(r["start_point"], r["end_point"], method=dist_method, dist_dict=dist_dict)[0],
@@ -1089,8 +1081,8 @@ def compute_metrics_with_moves(
 
 
 def compute_iteration_metrics(metrics):
-    iter_vt_labors = sum(sum(metrics['vt_count']) for metrics in metrics.values())
-    iter_extra_time = round(sum(sum(metrics['driver_extra_time']) for metrics in metrics.values()), 2)
-    iter_dist = round(sum(sum(metrics['driver_move_distance']) for metrics in metrics.values()), 2)
+    iter_vt_labors = sum(metrics['vt_count'])
+    iter_extra_time = round(sum(metrics['driver_extra_time']), 2)
+    iter_dist = round(sum(metrics['driver_move_distance']), 2)
 
     return iter_vt_labors, iter_extra_time, iter_dist

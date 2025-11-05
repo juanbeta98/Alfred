@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 
+from datetime import time, timedelta
 
 def top_service_days(df, 
                      city_col="city", 
@@ -335,11 +336,11 @@ def create_artificial_dynamic_week(
     return df_artificial, mapping_df
 
 
-
-def split_static_dynamic(df_artificial: pd.DataFrame,
-                         city_col: str = "city",
-                         schedule_col: str = "schedule_date",
-                         created_col: str = "created_at"
+def split_static_dynamic(
+    df_artificial: pd.DataFrame,
+    city_col: str = "city",
+    schedule_col: str = "schedule_date",
+    created_col: str = "created_at"
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Split artificial labors into static and dynamic subsets:
@@ -385,3 +386,83 @@ def split_static_dynamic(df_artificial: pd.DataFrame,
 
     return labors_inst_static_df, labors_inst_dynamic_df
 
+
+def create_hist_directory(labors_df: pd.DataFrame):
+    """
+    Genera un directorio histórico limpio y sin duplicados de labores.
+
+    Filtra registros con 'alfred' vacío o nulo, elimina duplicados según
+    ['date', 'city', 'alfred', 'address_id', 'address_point'], ordena los
+    resultados y convierte 'alfred' a tipo string.
+
+    Parámetros:
+        df_labors (pd.DataFrame): DataFrame con columnas
+            'date', 'city', 'alfred', 'address_id' y 'address_point'.
+
+    Retorna:
+        pd.DataFrame: Directorio histórico filtrado, ordenado y sin duplicados.
+    """
+    labors_df['date'] = labors_df['schedule_date'].dt.date
+
+    columns = ['date', 'city', 'alfred', 'address_id', 'address_point']
+    labors_df = labors_df[labors_df['alfred'] != '']
+    hist_directory = labors_df.dropna(subset=['alfred']).drop_duplicates(columns).sort_values(['date', 'city', 'alfred']).reset_index(drop=True)[columns]
+    hist_directory['alfred'] = hist_directory['alfred'].astype(int).astype(str)
+    hist_directory['inicio_horario'] = time(9,0,0)
+    hist_directory['fin_horario'] = time(17,0,0)
+
+    return hist_directory
+
+
+def filter_invalid_services(
+    labors_raw_df: pd.DataFrame,
+    min_delay_minutes: int = 30,
+    only_unilabor_services: bool = False,
+    verbose: bool = True,
+) -> pd.DataFrame:
+    """
+    Filtra servicios inválidos e inconsistentes.
+
+    Reglas:
+        1. Si algún labor no tiene 'address_id', se descarta TODO el servicio.
+        2. Se eliminan labores cuyo 'labor_name' sea 'Trailer transport'.
+        3. Se eliminan labores cuya fecha de programación ('schedule_date')
+           sea anterior a 'created_at' + una demora mínima (por defecto, 30 minutos).
+
+    Parámetros:
+        labors_raw_df (pd.DataFrame): DataFrame con todas las labores.
+            Debe incluir las columnas:
+            'service_id', 'address_id', 'labor_name',
+            'schedule_date' y 'created_at'.
+        min_delay_minutes (int, opcional): 
+            Tiempo mínimo (en minutos) que debe existir entre 'created_at'
+            y 'schedule_date'. Por defecto: 30 minutos.
+        verbose (bool, opcional):
+            Si True, imprime información de diagnóstico (por defecto True).
+
+    Retorna:
+        pd.DataFrame: DataFrame filtrado, sin servicios incompletos
+                      ni inconsistentes.
+    """
+    df = labors_raw_df.copy()
+
+    # 1️⃣ Eliminar servicios con address_id faltante
+    invalid_services = df.loc[(
+        (df['address_id'].isna()) | (df['labor_name']=='Trailer transport')), 'service_id'].unique()
+
+    df = df[~df['service_id'].isin(invalid_services)]
+
+    # 3️⃣ Eliminar labores cuya schedule_date sea anterior a created_at + min_delay
+    min_delay = timedelta(minutes=min_delay_minutes)
+    df = df[df['schedule_date'] >= (df['created_at'] + min_delay)]
+
+    if only_unilabor_services:
+        # Conservar solo servicios con una sola labor
+        service_counts = df['service_id'].value_counts()
+        single_labor_services = service_counts[service_counts == 1].index
+        df = df[df['service_id'].isin(single_labor_services)]
+
+    if verbose:
+        print(f"Filtrado final: {len(df)} filas restantes.")
+
+    return df.reset_index(drop=True)

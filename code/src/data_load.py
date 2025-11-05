@@ -1,7 +1,9 @@
 import pandas as pd
-import pickle
 import numpy as np
 import ast
+
+import pickle
+import os
 
 from pathlib import Path
 from typing import Tuple, Union, Optional
@@ -171,71 +173,6 @@ def upload_cities_table(data_path: str, city_codes: list = []) -> pd.DataFrame:
     return filtered_df[["cod_ciudad", "ciudad", "cod_depto", "depto"]].reset_index(drop=True)
 
 
-# def load_artificial_instance(
-#     data_path, 
-#     instance, 
-#     labors_raw_df, 
-#     tz: str = "America/Bogota"
-# ) -> pd.DataFrame:
-#     """
-#     Load the artificial instance from CSV and align its dtypes with a reference dataframe.
-
-#     Parameters
-#     ----------
-#     data_path : str
-#         Path to the folder containing the CSV (expects `data_clean/labors_art_df.csv`).
-#     instance : str
-#         Name of the artificial instance folder.
-#     labors_raw_df : pd.DataFrame
-#         Reference dataframe with correct dtypes.
-#     tz : str, optional
-#         Target timezone for datetime columns. Default = "America/Bogota".
-
-#     Returns
-#     -------
-#     labors_art_df : pd.DataFrame
-#         Artificial instance dataframe with dtypes aligned to `labors_raw_df`.
-#     """
-#     # Load CSV
-#     labors_art_df = pd.read_csv(f"{data_path}/instances/artif_inst/{instance}/labors_{instance}_df.csv")
-
-#     # Align dtypes with reference dataframe
-#     for col in labors_raw_df.columns:
-#         if col in labors_art_df.columns:
-#             if col == "city":
-#                 # Force string representation
-#                 labors_art_df[col] = labors_art_df[col].astype(str)
-#             else:
-#                 try:
-#                     labors_art_df[col] = labors_art_df[col].astype(labors_raw_df[col].dtype)
-
-#                 except Exception:
-#                     # If conversion fails, try datetime
-#                     if np.issubdtype(labors_raw_df[col].dtype, np.datetime64):
-#                         labors_art_df[col] = pd.to_datetime(labors_art_df[col], errors="coerce", utc=True)
-#                     # otherwise leave as is
-
-#     # Force timezone normalization for known datetime columns
-#     datetime_cols = [
-#         "labor_created_at",
-#         "labor_start_date",
-#         "labor_end_date",
-#         "created_at",
-#         "schedule_date",
-#         "actual_start",
-#         "actual_end",
-#     ]
-
-#     for col in datetime_cols:
-#         if col in labors_art_df.columns:
-#             labors_art_df[col] = (
-#                 pd.to_datetime(labors_art_df[col], errors="coerce", utc=True)
-#                   .dt.tz_convert(tz)
-#             )
-
-#     return labors_art_df
-
-
 def load_instance(
     data_path: str, 
     instance: str, 
@@ -262,7 +199,7 @@ def load_instance(
         Artificial instance dataframe with dtypes aligned to `labors_raw_df`.
     """
     # Load CSV
-    labors_art_df = pd.read_csv(f"{data_path}/instances/{instance_map[instance]}_inst/{instance}/labors_{instance}{online_type}_df.csv")
+    labors_art_df = pd.read_csv(f"{data_path}/instances/{instance_map(instance)}_inst/{instance}/labors_{instance}{online_type}_df.csv")
 
     # Align dtypes with reference dataframe
     for col in labors_raw_df.columns:
@@ -329,7 +266,7 @@ def load_online_instance(data_path, instance, labors_raw_df):
 def load_distances(data_path, distance_type, instance, distance_method='precalced'):
     # Distancias
     if distance_method=='precalced':
-        with open(f'{data_path}/instances/{instance_map[instance]}_inst/dist/{distance_type}_dist_dict.pkl', "rb") as f:
+        with open(f'{data_path}/instances/{instance_map(instance)}_inst/dist/{distance_type}_dist_dict.pkl', "rb") as f:
             dist_dict = pickle.load(f)
         return dist_dict
     else:
@@ -337,7 +274,7 @@ def load_distances(data_path, distance_type, instance, distance_method='precalce
 
 
 def load_directorio_hist_df(data_path, instance):
-    directorio_hist_df = pd.read_csv(f'{data_path}/instances/{instance_map[instance]}_inst/{instance}/directorio_hist_df.csv')
+    directorio_hist_df = pd.read_csv(f'{data_path}/instances/{instance_map(instance)}_inst/{instance}/directorio_hist_df.csv')
     for col in ['city', 'alfred']:
         directorio_hist_df[col] = directorio_hist_df[col].astype(int).astype(str)
 
@@ -346,11 +283,78 @@ def load_directorio_hist_df(data_path, instance):
 
 def load_inputs(data_path, instance, **kwargs):
     directorio_df, labor_raw_df, cities_df, duraciones_df, valid_cities = load_tables(data_path)
-    labors_real_df = load_instance(data_path, instance, labor_raw_df)
+    labors_real_df = load_instance(data_path, instance, labor_raw_df, **kwargs)
     directorio_hist_df = load_directorio_hist_df(data_path, instance)
 
     return (directorio_df, labor_raw_df, cities_df, duraciones_df, 
             valid_cities, labors_real_df, directorio_hist_df)
+
+
+def load_duraciones_df(data_path):
+    duraciones_df = pd.read_csv(f'{data_path}/data_clean/duraciones.csv')
+    duraciones_df['city'] = duraciones_df['city'].astype(str)
+    return duraciones_df
+
+
+def upload_ONLINE_static_solution(
+    data_path: str,
+    instance: str,
+    dist_method: str,
+    optimziation_obj: str,
+):
+    """
+    Carga resultados previos de optimización estática (alpha tuning) 
+    y los consolida en un solo DataFrame de labores y movimientos.
+    """
+    inst_path = f"{data_path}/resultados/online_operation/{instance}/{dist_method}"
+    labors_algo_df = pd.DataFrame()
+    moves_algo_df = pd.DataFrame()
+
+    upload_path = f"{inst_path}/res_algo_ONLINE_static.pkl"
+
+    if not os.path.exists(upload_path):
+        return pd.DataFrame(), pd.DataFrame()
+
+    with open(upload_path, "rb") as f:
+        res = pickle.load(f)
+        results_df, moves_df = res
+
+    if not results_df.empty:
+        results_df = results_df.sort_values(["city", "date", "service_id", "labor_id"])
+    if not moves_df.empty:
+        moves_df = moves_df.sort_values(["city", "date", "service_id", "labor_id"])
+
+    datetime_cols = [
+        "labor_created_at",
+        "labor_start_date",
+        "labor_end_date",
+        "created_at",
+        "schedule_date",
+        "actual_start",
+        "actual_end",
+    ]
+    for df in (results_df, moves_df):
+        for col in datetime_cols:
+            if col in df.columns:
+                df[col] = (
+                    pd.to_datetime(df[col], errors="coerce", utc=True)
+                    .dt.tz_convert("America/Bogota")
+                )
+
+        for col in ["city", "alfred", "service_id", "assigned_driver"]:
+            if col in df.columns:
+                df[col] = df[col].apply(
+                    lambda x: "" if (pd.isna(x) or x == "") else str(int(float(x)))
+                )
+
+    results_df["labor_id"] = results_df["labor_id"].apply(
+        lambda x: "" if (pd.isna(x) or x == "") else str(int(float(x)))
+    )
+
+    labors_algo_df = pd.concat([labors_algo_df, results_df])
+    moves_algo_df = pd.concat([moves_algo_df, moves_df])
+
+    return labors_algo_df, moves_algo_df
 
 
 def _order_labor_df(labors_df:pd.DataFrame, 

@@ -10,7 +10,7 @@ from time import perf_counter
 from src.data_load import load_inputs, load_distances
 from src.filtering import filter_labors_by_date, flexible_filter
 from src.metrics import collect_results_from_dicts, compute_metrics_with_moves, compute_iteration_metrics
-from src.utils import process_dynamic_instance, get_max_drivers, consolidate_run_results
+from src.utils import process_instance, get_max_drivers, consolidate_run_results
 from src.config import *
 from src.experimentation_config import instance_map, fechas_dict, max_drivers
 from src.pipeline import run_city_pipeline
@@ -22,18 +22,15 @@ from tqdm import tqdm
 # ——————————————————————————
 # Configuración previa
 # ——————————————————————————
-import pickle
-import pandas as pd
-from time import perf_counter
 
 if __name__ == "__main__":
     data_path = f'{REPO_PATH}/data'
-    instance_input = input('Input the instance to run, r/a?: ')
-    instance, instance_type = process_dynamic_instance(instance_input)
+    instance_input = input('Input the instance -inst{}- to run?: ')
+    instance, instance_type = process_instance(instance_input)
     
     ''' START RUN PARAMETERS'''
     distance_type = 'osrm'              # Options: ['osrm', 'manhattan']
-    distance_method = 'haversine'       # Options: ['precalced', 'haversine']
+    distance_method = 'precalced'       # Options: ['precalced', 'haversine']
 
     assignment_type = 'algorithm'
 
@@ -41,20 +38,20 @@ if __name__ == "__main__":
     ''' END RUN PARAMETERS'''
 
     max_iterations = max(iterations_nums)
-    max_iterations = 10
     fechas = fechas_dict[instance]
     initial_day = int(fechas[0].rsplit('-')[2])
 
     # Load shared inputs only once
     (directorio_df, labor_raw_df, cities_df, duraciones_df,
-        valid_cities, labors_real_df, directorio_hist_df) = load_inputs(data_path, instance, online_type='_static')
+        valid_cities, labors_real_df, directorio_hist_df) = load_inputs(data_path, instance)
 
     ### Optimization config
-    for optimization_variable in ['hybrid']:
+    # for optimization_variable in [metrics[2]]:
+    for optimization_variable in metrics:
         print_header(instance, distance_method, assignment_type, optimization_variable)    
 
-        for alpha in [0]:
-            print_iter_header(alpha)
+        for alpha in alphas:
+            print_iter_header(alpha) 
 
             start = perf_counter()
             inc_vt_labors = 0
@@ -66,16 +63,13 @@ if __name__ == "__main__":
                 ''' START RUN ITERATION FOR SET ALPHA '''
                 run_results = []
                 for start_date in fechas:
-
-                    dist_dict = load_distances(data_path, distance_type, instance, distance_method)
+                    dist_dict = load_distances(data_path, distance_type, instance, distance_method=distance_method)
                     df_day = filter_labors_by_date(
                         labors_real_df, start_date=start_date, end_date='one day lag'
                     )
                     results = []
                     
                     for city in valid_cities:
-                    
-                        max_drivers_num = get_max_drivers(instance, city, max_drivers, start_date, initial_day)
                         directorio_hist_filtered_df = flexible_filter(
                             directorio_hist_df, city=city, date=start_date
                         )
@@ -90,7 +84,6 @@ if __name__ == "__main__":
                             alpha=alpha,
                             DIST_DICT=dist_dict.get(city, {}),
                             dist_method=distance_method,
-                            max_drivers_num=max_drivers_num,
                             instance=instance,
                             driver_init_mode=driver_init_mode
                         )
@@ -126,13 +119,13 @@ if __name__ == "__main__":
                     update = False
                     
                     update, new_score, inc_score = should_update_incumbent(
-                    optimization_variable,
-                    iter_dist=iter_dist,
-                    iter_extra_time=iter_extra_time,
-                    inc_dist=inc_dist,
-                    inc_extra_time=inc_extra_time,
-                    dist_norm_factor=dist_norm_factor,
-                    extra_time_norm_factor=extra_time_norm_factor
+                        optimization_variable,
+                        iter_dist=iter_dist,
+                        iter_extra_time=iter_extra_time,
+                        inc_dist=inc_dist,
+                        inc_extra_time=inc_extra_time,
+                        dist_norm_factor=dist_norm_factor,
+                        extra_time_norm_factor=extra_time_norm_factor
                     )
 
                     if update:
@@ -166,12 +159,12 @@ if __name__ == "__main__":
                         f"{round(inc_extra_time,1)} \t{inc_dist} km"
                     )
 
-            save_full_path = (
-                f"{data_path}/resultados/online_operation/"
-                f"{instance}/res_{optimization_variable}_{alpha:.1f}_static.pkl"
-            )
-            with open(save_full_path, 'wb') as f:
-                pickle.dump([inc_values, duration, inc_results, inc_moves, inc_metrics], f)
+                    save_full_path = (
+                        f"{data_path}/resultados/alpha_calibration/{instance}/"
+                        f"{distance_method}/{optimization_variable}/res_{alpha:.1f}_{iter}.pkl"
+                    )
+                    with open(save_full_path, 'wb') as f:
+                        pickle.dump([inc_values, duration, inc_results, inc_moves, inc_metrics], f)
 
 
         print(f'-------- Successfully ran -{instance}- for objective {optimization_variable} --------\n')

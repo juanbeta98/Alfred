@@ -1,4 +1,7 @@
 import pandas as pd
+import pickle
+
+import os
 
 from src.experimentation_config import instance_map
 
@@ -11,6 +14,12 @@ codificacion_ciudades = {
                             '830':'PEREIRA',
                             '1004':'CALI'
                         }
+
+
+def print_iteration_header(details):
+    print(f'\n------ Algorithm solution search for {details}')
+    print('fecha \t\tcity \titer \tfound \trn_t \tn_ser \textr_t \tdriv_dist')
+
 
 def get_city_name(city_code: str, cities_df: pd.DataFrame) -> str:
     """
@@ -72,11 +81,59 @@ def get_max_drivers(instance, city, max_drivers, start_date, initial_day):
     return max_drivers_num
 
 
-def consolidate_run_results(results):
-    results_by_city = {}
-    for i in range(len(results)):
-        if len(results[i]) > 0:
-            city, df_cleaned, df_moves, n_drivers = results[i]
-            results_by_city[city] = (df_cleaned, df_moves, n_drivers)
+# def consolidate_run_results(results):
+#     results_by_city = {}
+#     for i in range(len(results)):
+#         if len(results[i]) > 0:
+#             results_df, df_moves_df = results[i]
+#             results_by_city[city] = (df_cleaned, df_moves, n_drivers)
     
-    return results_by_city
+#     return results_by_city
+
+
+def collect_algo_baseline_df(
+    data_path: str, 
+    instance: str, 
+    dist_method: str, 
+    optimization_obj: str,
+) -> tuple:
+    labors_algo_df = pd.DataFrame()
+    moves_algo_df = pd.DataFrame()
+
+
+    upload_path = (f'{data_path}/resultados/online_operation/{instance}/'
+                    f'{dist_method}/res_algo_OFFLINE.pkl')
+
+    if not os.path.exists(upload_path):
+        raise FileNotFoundError(f"Expected results file not found: {f'res_algo_OFFLINE.pkl'}")
+    
+    with open(upload_path, "rb") as f:
+        res = pickle.load(f)
+        labors_algo_df, moves_algo_df = res
+
+    if not labors_algo_df.empty:
+        labors_algo_df = labors_algo_df.sort_values(["city", "date", "service_id", "labor_id"])
+    if not moves_algo_df.empty:
+        moves_algo_df = moves_algo_df.sort_values(["city", "date", "service_id", "labor_id"])
+
+    # Normalize datetime columns to Bogotá tz
+    datetime_cols = [
+        "labor_created_at",
+        "labor_start_date",
+        "labor_end_date",
+        "created_at",
+        "schedule_date",
+        "actual_start", 
+        "actual_end"
+        ]
+
+
+    for df in (labors_algo_df, moves_algo_df):
+        for col in datetime_cols:
+            if col in df.columns:
+                df[col] = (
+                    pd.to_datetime(df[col], errors="coerce", utc=True)
+                    .dt.tz_convert("America/Bogota")
+                )
+    
+    return labors_algo_df, moves_algo_df

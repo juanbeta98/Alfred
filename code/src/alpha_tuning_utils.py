@@ -12,8 +12,7 @@ fechas = pd.date_range("2026-01-05", "2026-01-11").strftime("%Y-%m-%d").tolist()
 # fechas = pd.date_range("2025-07-21", "2025-07-27").strftime("%Y-%m-%d").tolist()
 
 ### Iteration parameters
-alphas = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1]
-iterations_nums = [10, 25, 50, 100, 250, 500]  # checkpoints
+alphas = [i/10 for i in range(0,11)]
 
 metrics = ['hybrid', 'driver_distance', 'driver_extra_time']
 

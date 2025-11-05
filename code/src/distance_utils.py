@@ -99,7 +99,7 @@ def _update_distance_dictionary(
     from datetime import datetime
 
     data_path = '/Users/juanbeta/Library/CloudStorage/GoogleDrive-juan.beta98@gmail.com/My Drive/Work/Alfred/Alfred/data'
-    inst_path = f'{data_path}/instances/{instance_map[instance]}_inst/dist'
+    inst_path = f'{data_path}/instances/{instance_map(instance)}_inst/dist'
     pickle_file = f'{inst_path}/osrm_dist_dict.pkl'
     log_file = f'{inst_path}/distance_log.csv'
 
