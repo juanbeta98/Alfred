@@ -197,6 +197,8 @@ def run_INSERT_BUFFER(
     all_batch_metrics = []
     all_traces = []
 
+    new_postponed_labors = []
+
     # num workers
     n_workers = (n_processes or max(cpu_count() - 1, 1)) if multiprocessing else 1
 
@@ -312,10 +314,13 @@ def run_INSERT_BUFFER(
                     continue
 
                 # commit best into final schedule (frozen past + new inserted labors)
-                final_labors = pd.concat([final_labors, best["results"]]).reset_index(drop=True)
-                final_moves = pd.concat([final_moves, best["moves"]]).reset_index(drop=True)
+                # final_labors = pd.concat([final_labors, best["results"]]).reset_index(drop=True)
+                # final_moves = pd.concat([final_moves, best["moves"]]).reset_index(drop=True)
 
-                postponed_labors += best['postponed_labors']
+                final_labors = best['results']
+                final_moves = best['moves']
+
+                new_postponed_labors += best['postponed_labors']
 
                 all_batch_metrics.append({
                     "city": city, "date": fecha, "batch_id": batch_id,
@@ -330,6 +335,8 @@ def run_INSERT_BUFFER(
 
         clear_last_n_lines(2)
 
+    postponed_labors += new_postponed_labors
+
     # consolidate and save
     results_df, moves_df = concat_run_results(run_results)
     if save_results:
@@ -340,10 +347,10 @@ def run_INSERT_BUFFER(
         os.makedirs(extra_output_dir, exist_ok=True)  # Creates folder if missing
 
         with open(os.path.join(output_dir, "res_algo_INSERT_BUFFER.pkl"), "wb") as f:
-            pickle.dump([results_df, moves_df], f)
+            pickle.dump([results_df, moves_df, postponed_labors], f)
 
         pd.DataFrame(all_batch_metrics).to_csv(os.path.join(extra_output_dir, "INSERT_BUFFER_batch_metrics.csv"), index=False)
         pd.DataFrame(all_traces).to_csv(os.path.join(extra_output_dir, "INSERT_BUFFER_traces.csv"), index=False)
 
     print(f"\n ✅ INSERT_BUFFER finished in {round(perf_counter() - global_start, 1)}s\n")
-    return results_df, moves_df, pd.DataFrame(all_batch_metrics), pd.DataFrame(all_traces)
+    return True

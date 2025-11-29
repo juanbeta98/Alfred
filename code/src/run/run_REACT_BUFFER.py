@@ -174,7 +174,7 @@ def run_single_iteration_worker(
     np.random.seed(seed)
 
     try:
-        results_df, moves_df = run_assignment_algorithm(
+        results_df, moves_df, postponed_labors = run_assignment_algorithm(
             df_cleaned_template=labors_reassign_df,
             directorio_df=directorio_online_df,
             duraciones_df=duraciones_df,
@@ -232,7 +232,8 @@ def run_single_iteration_worker(
         "dist": dist,
         "metrics": metrics_dict,
         "results": results_df,
-        "moves": moves_df
+        "moves": moves_df,
+        'postponed_labors': postponed_labors
     }
 
 
@@ -326,6 +327,7 @@ def process_iterations_for_batch(
             "results": r["results"],
             "moves": r["moves"],
             "metrics": r["metrics"],
+            'postponed_labors': r['postponed_labors']
         })
 
     df_results = pd.DataFrame(rows_for_df).sort_values("iter").reset_index(drop=True)
@@ -360,6 +362,7 @@ def process_iterations_for_batch(
         "results": chosen["results"],
         "moves": chosen["moves"],
         "metrics": chosen["metrics"],
+        'postponed_labors': chosen['postponed_labors']
     }
 
     # Build iteration checkpoint traces for iterations in iterations_nums_city.
@@ -457,6 +460,8 @@ def run_REACT_BUFFER(
     run_results = []
     all_batch_metrics = []
     all_traces = []
+
+    new_postponed_labors = []
 
     for fecha in fechas:
         print(f"{'-'*120}\n▶ Processing date: {fecha} / {fechas[-1]}")
@@ -586,6 +591,7 @@ def run_REACT_BUFFER(
                 # FINAL = frozen (past) + incumbent results (reassigned/future)
                 final_labors_for_city_date = pd.concat([labors_frozen_df, inc_state['results']], ignore_index=True).reset_index(drop=True)
                 final_moves_for_city_date = pd.concat([moves_frozen_df, inc_state['moves']], ignore_index=True).reset_index(drop=True)
+                new_postponed_labors += inc_state['postponed_labors']
 
                 # record batch metrics
                 best_obj = inc_state['dist'] if optimization_obj == 'driver_distance' else (
@@ -613,6 +619,7 @@ def run_REACT_BUFFER(
 
     # final consolidation
     results_df, moves_df = concat_run_results(run_results)
+    postponed_labors += new_postponed_labors
 
     if batch_interval_minutes == 0:
         algorithm = 'REACT_BUFFER_0'
@@ -627,7 +634,7 @@ def run_REACT_BUFFER(
         os.makedirs(extra_output_dir, exist_ok=True)  # Creates folder if missing
 
         with open(os.path.join(output_dir, f"res_algo_{algorithm}.pkl"), "wb") as f:
-            pickle.dump([results_df, moves_df], f)
+            pickle.dump([results_df, moves_df, postponed_labors], f)
 
         # save batch metrics and traces
         batch_metrics_df = pd.DataFrame(all_batch_metrics)

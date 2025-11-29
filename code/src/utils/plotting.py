@@ -3,6 +3,8 @@ import numpy as np
 
 import matplotlib.pyplot as plt
 
+import os
+
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -14,6 +16,150 @@ from datetime import timedelta
 from src.data.metrics import collect_vt_metrics_range, compute_metrics_with_moves
 from src.utils.utils import codificacion_ciudades, get_city_name_from_code
 from src.data.distance_utils import distance
+
+
+def plot_metrics_comparison_dynamic(
+    algorithms,
+    city,
+    metricas,
+    dist_dict,
+    fechas,
+    metrics_with_gap=None,
+    save_dir=None,
+    
+):
+    """Compares any number of algorithms/historic datasets dynamically, 
+    with optional relative gap display vs baseline 'Histórico'."""
+
+    # Default empty list if not provided
+    metrics_with_gap = metrics_with_gap or []
+
+    all_metrics = pd.DataFrame()
+
+    # Compute metrics for each algorithm
+    metrics_by_algo = {}
+    for algo in algorithms:
+        df = compute_metrics_with_moves(
+            algo["labors_df"], algo["moves_df"], fechas, dist_dict,
+            workday_hours=8,
+            city=city,
+            assignment_type=algo["type"],
+            skip_weekends=False,
+            dist_method='haversine'
+        )
+        metrics_by_algo[algo["name"]] = df
+
+        df_altered = df.copy()
+        df_altered['algo'] = algo['name']
+        all_metrics = pd.concat([all_metrics, df_altered])
+
+    if save_dir:
+        all_metrics.to_csv(f'{save_dir}/results_summary.csv', index=True)
+
+    if isinstance(metricas, str):
+        metricas = [metricas]
+
+    # Prepare x-axis
+    x_vals = pd.to_datetime(metrics_by_algo[algorithms[0]["name"]]["day"]).dt.strftime("%Y-%m-%d")
+
+    # Create one figure per metric
+    for metrica in metricas:
+        fig = make_subplots(
+            rows=1, cols=2,
+            column_widths=[0.35, 0.65],
+            subplot_titles=["Totales", "Serie diaria"]
+        )
+
+        totals = {
+            algo["name"]: metrics_by_algo[algo["name"]][metrica].sum()
+            for algo in algorithms
+        }
+
+        # Get baseline (Histórico)
+        baseline_val = totals.get("Histórico", None)
+
+        # --- Bar plot (left) ---
+        for algo in algorithms:
+            if algo.get("visible", True):
+                val = totals[algo["name"]]
+
+                # Compute percentage or absolute gap vs baseline
+                if (
+                    baseline_val is not None 
+                    and baseline_val != 0 
+                    and metrica in metrics_with_gap
+                    and algo["name"] != "Histórico"
+                ):
+                    abs_gap = val - baseline_val
+                    perc_gap = (abs_gap / baseline_val) * 100
+                    text = f"{val:.0f}<br>{perc_gap:+.1f}%"
+                else:
+                    text = f"{val:.0f}"
+
+                fig.add_trace(go.Bar(
+                    x=[algo["name"]],
+                    y=[val],
+                    marker_color=algo["color"],
+                    name=algo["name"],
+                    text=[text],
+                    textposition="auto"
+                ), row=1, col=1)
+
+        # --- Time series (right) ---
+        for algo in algorithms:
+            if algo.get("visible", True):
+                dash_style = (
+                    "solid" if algo["type"] == "historic"
+                    else "dashdot" if "react" in algo["name"].lower()
+                    else "dash"
+                )
+                fig.add_trace(go.Scatter(
+                    x=x_vals,
+                    y=metrics_by_algo[algo["name"]][metrica],
+                    mode="lines+markers",
+                    name=algo["name"],
+                    line=dict(color=algo["color"], dash=dash_style, width=2),
+                    marker=dict(size=7)
+                ), row=1, col=2)
+
+        # --- Layout ---
+        titles = {
+            'service_count': 'Número de servicios',
+            'vt_count': 'Número labores Vehicle Transportation',
+            'num_drivers': 'Número conductores',
+            'driver_extra_time': 'Tiempo extra', 
+            'driver_move_distance': 'Distancia en vacío'
+        }
+        fig.update_layout(
+            height=500, width=1100,
+            title=dict(
+                text=f"{titles[metrica]} — {get_city_name_from_code(city)}",
+                x=0.5, xanchor="center"
+            ),
+            legend=dict(
+                orientation="h",
+                yanchor="top",
+                y=-0.25,
+                xanchor="center",
+                x=0.5,
+                font=dict(size=11)
+            ),
+            plot_bgcolor="white",
+            margin=dict(t=100, b=120)
+        )
+
+        fig.update_xaxes(showgrid=True, gridwidth=0.5, gridcolor="lightgray")
+        fig.update_yaxes(showgrid=True, gridwidth=0.5, gridcolor="lightgray")
+
+        if save_dir is not None:
+            file_path = os.path.join(
+                save_dir,
+                f"{city}_{metrica}.html"
+            )
+
+            fig.write_html(file_path, include_plotlyjs="cdn")
+        else:
+            fig.show()
 
 
 def add_aggregated_totals(
@@ -555,158 +701,158 @@ def plot_horizontal_bar_from_tuples(
     plt.show()
 
 
-def plot_weekly_services(
-    df, 
-    cities_to_plot, 
-    city_col="city",
-    date_col="labor_start_date"
-):
-    """
-    Genera un gráfico de líneas del número semanal de servicios por ciudad y el total.
+# def plot_weekly_services(
+#     df, 
+#     cities_to_plot, 
+#     city_col="city",
+#     date_col="labor_start_date"
+# ):
+#     """
+#     Genera un gráfico de líneas del número semanal de servicios por ciudad y el total.
     
-    Parámetros
-    ----------
-    df : pd.DataFrame
-        DataFrame con columnas `service_id`, `city` y `labor_start_date`.
-    cities_to_plot : list
-        Lista de códigos de ciudad a incluir en el gráfico.
-    city_col : str, default="city"
-        Nombre de la columna con el código de ciudad.
-    date_col : str, default="labor_start_date"
-        Nombre de la columna con la fecha de inicio del labor.
-    """
+#     Parámetros
+#     ----------
+#     df : pd.DataFrame
+#         DataFrame con columnas `service_id`, `city` y `labor_start_date`.
+#     cities_to_plot : list
+#         Lista de códigos de ciudad a incluir en el gráfico.
+#     city_col : str, default="city"
+#         Nombre de la columna con el código de ciudad.
+#     date_col : str, default="labor_start_date"
+#         Nombre de la columna con la fecha de inicio del labor.
+#     """
 
-    # Aseguramos que la columna de fecha esté en datetime
-    df[date_col] = pd.to_datetime(df[date_col])
+#     # Aseguramos que la columna de fecha esté en datetime
+#     df[date_col] = pd.to_datetime(df[date_col])
 
-    # Agrupamos a nivel servicio para no contar varias veces un servicio con varios labores
-    df_unique = df.drop_duplicates(subset=["service_id", city_col])
+#     # Agrupamos a nivel servicio para no contar varias veces un servicio con varios labores
+#     df_unique = df.drop_duplicates(subset=["service_id", city_col])
 
-    # Agregamos columna de semana (lunes como inicio)
-    df_unique["week"] = df_unique[date_col].dt.to_period("W").apply(lambda r: r.start_time)
+#     # Agregamos columna de semana (lunes como inicio)
+#     df_unique["week"] = df_unique[date_col].dt.to_period("W").apply(lambda r: r.start_time)
 
-    # Conteo semanal por ciudad
-    weekly_counts = (
-        df_unique.groupby(["week", city_col])["service_id"]
-        .nunique()
-        .reset_index(name="num_services")
-    )
+#     # Conteo semanal por ciudad
+#     weekly_counts = (
+#         df_unique.groupby(["week", city_col])["service_id"]
+#         .nunique()
+#         .reset_index(name="num_services")
+#     )
 
-    # Pivot para tener cada ciudad como columna
-    weekly_pivot = weekly_counts.pivot(index="week", columns=city_col, values="num_services").fillna(0)
+#     # Pivot para tener cada ciudad como columna
+#     weekly_pivot = weekly_counts.pivot(index="week", columns=city_col, values="num_services").fillna(0)
 
-    # Filtramos solo las ciudades deseadas
-    weekly_filtered = weekly_pivot[cities_to_plot].copy()
+#     # Filtramos solo las ciudades deseadas
+#     weekly_filtered = weekly_pivot[cities_to_plot].copy()
 
-    # Agregamos columna total
-    weekly_filtered["TOTAL"] = weekly_filtered.sum(axis=1)
+#     # Agregamos columna total
+#     weekly_filtered["TOTAL"] = weekly_filtered.sum(axis=1)
 
-    # 🔎 Encontramos la semana con mayor total
-    max_week = weekly_filtered["TOTAL"].idxmax()
-    max_value = weekly_filtered["TOTAL"].max()
-    print(f"📊 La semana con más servicios fue {max_week.strftime('%Y-%m-%d')} con {max_value} servicios en total.")
+#     # 🔎 Encontramos la semana con mayor total
+#     max_week = weekly_filtered["TOTAL"].idxmax()
+#     max_value = weekly_filtered["TOTAL"].max()
+#     print(f"📊 La semana con más servicios fue {max_week.strftime('%Y-%m-%d')} con {max_value} servicios en total.")
 
-    # --- PLOTEO ---
-    plt.figure(figsize=(14, 6))
-    sns.set_style("whitegrid")
+#     # --- PLOTEO ---
+#     plt.figure(figsize=(14, 6))
+#     sns.set_style("whitegrid")
 
-    # Paleta de colores con seaborn
-    palette = sns.color_palette("Set2", len(cities_to_plot) + 1)
+#     # Paleta de colores con seaborn
+#     palette = sns.color_palette("Set2", len(cities_to_plot) + 1)
 
-    # Graficamos cada ciudad
-    for i, col in enumerate(weekly_filtered.columns):
-        city_name = codificacion_ciudades.get(col, col)
-        plt.plot(weekly_filtered.index, weekly_filtered[col],
-                 label=city_name, linewidth=2, marker="o", markersize=4, color=palette[i])
+#     # Graficamos cada ciudad
+#     for i, col in enumerate(weekly_filtered.columns):
+#         city_name = codificacion_ciudades.get(col, col)
+#         plt.plot(weekly_filtered.index, weekly_filtered[col],
+#                  label=city_name, linewidth=2, marker="o", markersize=4, color=palette[i])
 
-    # Destacamos la semana máxima en el gráfico
-    plt.axvline(max_week, color="black", linestyle="--", alpha=0.7)
-    plt.text(max_week, max_value, f"   {max_value}", color="black", weight="bold")
+#     # Destacamos la semana máxima en el gráfico
+#     plt.axvline(max_week, color="black", linestyle="--", alpha=0.7)
+#     plt.text(max_week, max_value, f"   {max_value}", color="black", weight="bold")
 
-    plt.title("Servicios semanales por ciudad y total", fontsize=16, weight="bold")
-    plt.xlabel("Semana", fontsize=12)
-    plt.ylabel("Número de servicios", fontsize=12)
-    plt.legend(title="Ciudad", bbox_to_anchor=(1.05, 1), loc="upper left")
-    plt.tight_layout()
+#     plt.title("Servicios semanales por ciudad y total", fontsize=16, weight="bold")
+#     plt.xlabel("Semana", fontsize=12)
+#     plt.ylabel("Número de servicios", fontsize=12)
+#     plt.legend(title="Ciudad", bbox_to_anchor=(1.05, 1), loc="upper left")
+#     plt.tight_layout()
 
-    plt.show()
+#     plt.show()
 
 
-def plot_daily_services_week(
-    df, 
-    cities_to_plot, 
-    start_date, 
-    city_col="city", 
-    date_col="labor_start_date"
-):
-    """
-    Genera un gráfico de líneas del número diario de servicios por ciudad y el total,
-    limitado a un intervalo de 7 días a partir de `start_date`.
+# def plot_daily_services_week(
+#     df, 
+#     cities_to_plot, 
+#     start_date, 
+#     city_col="city", 
+#     date_col="labor_start_date"
+# ):
+#     """
+#     Genera un gráfico de líneas del número diario de servicios por ciudad y el total,
+#     limitado a un intervalo de 7 días a partir de `start_date`.
 
-    Parámetros
-    ----------
-    df : pd.DataFrame
-        DataFrame con columnas `service_id`, `city` y `labor_start_date`.
-    cities_to_plot : list
-        Lista de códigos de ciudad a incluir en el gráfico.
-    start_date : str o pd.Timestamp
-        Fecha de inicio de la semana (ej: '2023-07-03').
-    city_col : str, default="city"
-        Nombre de la columna con el código de ciudad.
-    date_col : str, default="labor_start_date"
-        Nombre de la columna con la fecha de inicio del labor.
-    """
+#     Parámetros
+#     ----------
+#     df : pd.DataFrame
+#         DataFrame con columnas `service_id`, `city` y `labor_start_date`.
+#     cities_to_plot : list
+#         Lista de códigos de ciudad a incluir en el gráfico.
+#     start_date : str o pd.Timestamp
+#         Fecha de inicio de la semana (ej: '2023-07-03').
+#     city_col : str, default="city"
+#         Nombre de la columna con el código de ciudad.
+#     date_col : str, default="labor_start_date"
+#         Nombre de la columna con la fecha de inicio del labor.
+#     """
 
-    df[date_col] = pd.to_datetime(df[date_col])
-    tz = df[date_col].dt.tz   # detecta la tz del dataframe
-    start_date = pd.to_datetime(start_date).tz_localize(tz)
-    end_date = start_date + pd.Timedelta(days=6)
+#     df[date_col] = pd.to_datetime(df[date_col])
+#     tz = df[date_col].dt.tz   # detecta la tz del dataframe
+#     start_date = pd.to_datetime(start_date).tz_localize(tz)
+#     end_date = start_date + pd.Timedelta(days=6)
 
-    # Agrupamos a nivel servicio para no contar varias veces un servicio con varios labores
-    df_unique = df.drop_duplicates(subset=["service_id", city_col])
+#     # Agrupamos a nivel servicio para no contar varias veces un servicio con varios labores
+#     df_unique = df.drop_duplicates(subset=["service_id", city_col])
 
-    # Filtramos por el intervalo de fechas
-    df_week = df_unique[(df_unique[date_col] >= start_date) & (df_unique[date_col] <= end_date)].copy()
+#     # Filtramos por el intervalo de fechas
+#     df_week = df_unique[(df_unique[date_col] >= start_date) & (df_unique[date_col] <= end_date)].copy()
 
-    # Conteo diario por ciudad
-    daily_counts = (
-        df_week.groupby([df_week[date_col].dt.date, city_col])["service_id"]
-        .nunique()
-        .reset_index(name="num_services")
-    )
+#     # Conteo diario por ciudad
+#     daily_counts = (
+#         df_week.groupby([df_week[date_col].dt.date, city_col])["service_id"]
+#         .nunique()
+#         .reset_index(name="num_services")
+#     )
 
-    # Pivot para tener cada ciudad como columna
-    daily_pivot = daily_counts.pivot(index=date_col, columns=city_col, values="num_services").fillna(0)
+#     # Pivot para tener cada ciudad como columna
+#     daily_pivot = daily_counts.pivot(index=date_col, columns=city_col, values="num_services").fillna(0)
 
-    # Filtramos solo las ciudades deseadas
-    daily_filtered = daily_pivot[cities_to_plot].copy()
+#     # Filtramos solo las ciudades deseadas
+#     daily_filtered = daily_pivot[cities_to_plot].copy()
 
-    # Agregamos columna total
-    daily_filtered["TOTAL"] = daily_filtered.sum(axis=1)
+#     # Agregamos columna total
+#     daily_filtered["TOTAL"] = daily_filtered.sum(axis=1)
 
-    # --- PLOTEO ---
-    plt.figure(figsize=(12, 6))
-    sns.set_style("whitegrid")
+#     # --- PLOTEO ---
+#     plt.figure(figsize=(12, 6))
+#     sns.set_style("whitegrid")
 
-    # Paleta de colores con seaborn
-    palette = sns.color_palette("Set2", len(cities_to_plot) + 1)
+#     # Paleta de colores con seaborn
+#     palette = sns.color_palette("Set2", len(cities_to_plot) + 1)
 
-    # Graficamos cada ciudad
-    for i, col in enumerate(daily_filtered.columns):
-        city_name = codificacion_ciudades.get(col, col)
-        plt.plot(daily_filtered.index, daily_filtered[col],
-                 label=city_name, linewidth=2, marker="o", markersize=6, color=palette[i])
+#     # Graficamos cada ciudad
+#     for i, col in enumerate(daily_filtered.columns):
+#         city_name = codificacion_ciudades.get(col, col)
+#         plt.plot(daily_filtered.index, daily_filtered[col],
+#                  label=city_name, linewidth=2, marker="o", markersize=6, color=palette[i])
 
-    # Título y labels
-    plt.title(f"Servicios diarios por ciudad ({start_date.strftime('%Y-%m-%d')} a {end_date.strftime('%Y-%m-%d')})",
-              fontsize=16, weight="bold")
-    plt.xlabel("Fecha", fontsize=12)
-    plt.ylabel("Número de servicios", fontsize=12)
-    plt.xticks(rotation=45)
-    plt.legend(title="Ciudad", bbox_to_anchor=(1.05, 1), loc="upper left")
-    plt.tight_layout()
+#     # Título y labels
+#     plt.title(f"Servicios diarios por ciudad ({start_date.strftime('%Y-%m-%d')} a {end_date.strftime('%Y-%m-%d')})",
+#               fontsize=16, weight="bold")
+#     plt.xlabel("Fecha", fontsize=12)
+#     plt.ylabel("Número de servicios", fontsize=12)
+#     plt.xticks(rotation=45)
+#     plt.legend(title="Ciudad", bbox_to_anchor=(1.05, 1), loc="upper left")
+#     plt.tight_layout()
 
-    plt.show()
+#     plt.show()
 
 
 def plot_labor_duration_hist(

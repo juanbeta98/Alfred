@@ -198,7 +198,11 @@ def load_instance(
         Artificial instance dataframe with dtypes aligned to `labors_raw_df`.
     """
     # Load CSV
-    labors_art_df = pd.read_csv(f"{data_path}/instances/{instance_map(instance)}_inst/{instance}/labors_{instance}{online_type}_df.csv")
+    instance_type = instance_map(instance)
+    if instance_type != 'simu':
+        labors_art_df = pd.read_csv(f"{data_path}/instances/{instance_type}_inst/{instance}/labors_{instance}{online_type}_df.csv")
+    else:
+        labors_art_df = pd.read_csv(f"{data_path}/instances/{instance_type}_inst/{instance}/labors_sim{online_type}_df.csv")
 
     # Align dtypes with reference dataframe
     for col in labors_raw_df.columns:
@@ -262,6 +266,7 @@ def load_online_instance(data_path, instance, labors_raw_df):
     return labors_real_df, labors_static_df, labors_dynamic_df
 
 
+
 def load_distances(data_path, distance_type, instance, distance_method='precalced'):
     # Distancias
     if distance_method=='precalced':
@@ -299,13 +304,13 @@ def upload_ONLINE_static_solution(
     data_path: str,
     instance: str,
     dist_method: str,
-    optimziation_obj: str,
+    instance_type: str = 'online_operation'
 ):
     """
     Carga resultados previos de optimización estática (alpha tuning) 
     y los consolida en un solo DataFrame de labores y movimientos.
     """
-    inst_path = f"{data_path}/resultados/online_operation/{instance}/{dist_method}"
+    inst_path = f"{data_path}/resultados/{instance_type}/{instance}/{dist_method}"
     labors_algo_df = pd.DataFrame()
     moves_algo_df = pd.DataFrame()
 

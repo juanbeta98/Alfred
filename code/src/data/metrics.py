@@ -107,6 +107,7 @@ def collect_vt_metrics_range(
         # --- Agregar fila con métricas ---
         rows.append({
             "day": day_str,
+            'service_count': m['service_count'],
             "vt_count": m["vt_count"],
             "num_drivers": m["num_drivers"],
             "labores_por_conductor": round(m["labores_por_conductor"], 3),
@@ -181,6 +182,9 @@ def vt_metrics(
     # Filtrar por día
     df_day = _filter_day(df, day_str, start_col="start_time", end_col="end_time")
 
+    # Conteo de servicios
+    service_count = int(len(df_day['service_id'].unique()))
+
     # Conteo de labores VT
     vt_mask = df_day["labor_category"].eq("VEHICLE_TRANSPORTATION")
     df_vt = df_day.loc[vt_mask].copy()
@@ -218,6 +222,7 @@ def vt_metrics(
     # Tabla resumen
     resumen_df = pd.DataFrame({
         "Métrica": [
+            'Número de sevicios',
             "Labores VEHICLE_TRANSPORTATION (día filtrado)",
             "Conductores únicos (alfred)",
             "Labores por conductor",
@@ -231,6 +236,7 @@ def vt_metrics(
             # "Tiempo extra tarde (min)"
         ],
         "Valor": [
+            service_count,
             vt_count,
             num_drivers,
             round(labores_por_conductor, 3),
@@ -246,6 +252,7 @@ def vt_metrics(
     })
 
     return {
+        'service_count': service_count,
         "vt_count": vt_count,
         "alfred_col": alfred_col,
         "alfred_ids": alfred_ids,
@@ -927,12 +934,10 @@ def collect_results_from_dicts(
 def concat_run_results(run_results: list):
     all_labors = pd.DataFrame()
     all_moves = pd.DataFrame()
-    all_postponed_labors = list()
 
     for res in run_results: 
         all_labors = pd.concat([all_labors, res[0]])
         all_moves = pd.concat([all_moves, res[1]])
-        all_postponed_labors += res[2]
 
     # Ordenamiento
     if not all_labors.empty:
@@ -940,7 +945,7 @@ def concat_run_results(run_results: list):
     if not all_moves.empty:
         all_moves = all_moves.sort_values(["city", "date", "service_id", "labor_id"])
 
-    return all_labors, all_moves, all_postponed_labors
+    return all_labors, all_moves
 
 
 def compute_metrics_with_moves(

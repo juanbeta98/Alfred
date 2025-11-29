@@ -225,6 +225,7 @@ def run_ONLINE_static_parallel(
     )
 
     run_results = []
+    postponed_labors = []
 
     for fecha in fechas:
         print(f"{'-'*120}\n▶ Processing date: {fecha} / {fechas[-1]}")
@@ -274,12 +275,14 @@ def run_ONLINE_static_parallel(
             best_idx = select_best_iteration(df_results, optimization_obj)
             inc_state = df_results.iloc[best_idx]
 
-            run_results.append([inc_state["results"], inc_state["moves"], inc_state['postponed_labors']])
+            postponed_labors += inc_state["postponed_labors"]
+
+            run_results.append([inc_state["results"], inc_state["moves"]])
         
         clear_last_n_lines(2)
 
     # --- Combine all results ---
-    results_df, moves_df, postponed_labors = concat_run_results(run_results)
+    results_df, moves_df = concat_run_results(run_results)
 
     if save_results:
         output_dir = os.path.join(data_path, "resultados", "online_operation", instance, distance_method)

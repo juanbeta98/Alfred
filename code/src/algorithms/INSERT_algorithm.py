@@ -96,7 +96,9 @@ def insert_single_labor(
         duraciones_df, city, labor["labor_type"]
     )
     labor_pos = labor["end_address_point"]
-    print(labor['labor_id'])
+
+    if not curr_end_time:
+        curr_end_time = labor['schedule_date']
 
     new_labors, new_moves, new_end_time = commit_nontransport_labor_insertion(
         labors_df=labors_df,

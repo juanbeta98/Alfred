@@ -44,6 +44,8 @@ def run_online_hist_baseline(
     fechas = fechas_map(instance)
 
     run_results = []
+    postponed_labors = []
+
     for fecha in fechas:
         dist_dict = load_distances(data_path, distance_type, instance, distance_method)
         df_day = filter_labors_by_date(
@@ -66,7 +68,7 @@ def run_online_hist_baseline(
             )
 
             # 7. Ejecutar el algorithmo de assignación
-            results_df, moves_df, postponed_labors = run_assignment_algorithm(  
+            results_df, moves_df, new_postponed_labors = run_assignment_algorithm(  
                 df_cleaned_template=df_cleaned_template,
                 directorio_df=directorio_hist_filtered_df,
                 duraciones_df=duraciones_df,
@@ -86,10 +88,11 @@ def run_online_hist_baseline(
             moves_df['city'] = city
             
             moves_df['date'] = fecha
-            run_results.append((results_df, moves_df, postponed_labors))
+            postponed_labors += new_postponed_labors
+            run_results.append((results_df, moves_df))
 
     # Build consolidated dfs for this run
-    results_df, moves_df, postponed_labors = concat_run_results(run_results)
+    results_df, moves_df = concat_run_results(run_results)
 
     # Guardar en pickle
     # ------ Ensure output directory exists ------
@@ -326,6 +329,7 @@ def run_online_algo_baseline_parallel(
     ) = prep_algorithm_inputs(instance, distance_method, optimization_obj)
 
     run_results = []
+    postponed_labors = []
 
     for fecha in fechas:
         print(f"{'-'*120}\n▶ Processing date: {fecha} / {fechas[-1]}")
@@ -376,12 +380,14 @@ def run_online_algo_baseline_parallel(
             best_idx = select_best_iteration(df_results, optimization_obj)
             inc_state = df_results.iloc[best_idx]
 
-            run_results.append([inc_state["results"], inc_state["moves"], inc_state["postponed_labors"]])
+            postponed_labors += inc_state["postponed_labors"]
+
+            run_results.append([inc_state["results"], inc_state["moves"]])
 
         clear_last_n_lines(2)
 
     # --- Combine all results ---
-    results_df, moves_df, postponed_labors = concat_run_results(run_results)
+    results_df, moves_df = concat_run_results(run_results)
 
     if save_results:
         output_dir = os.path.join(data_path, "resultados", "online_operation", instance, distance_method)

@@ -21,17 +21,17 @@ hyperparameter_selection = {
 }
 
 max_iterations = {
-    '149': 1000,
-        '1': 750,
-        '1004': 750,
-        '126': 150,
-        '150': 150,
-        '844': 150,
-        '830': 150 ,
+    '149': 750,
+        '1': 500,
+        '1004': 500,
+        '126': 50,
+        '150': 50,
+        '844': 50,
+        '830': 50,
 }
 
-max_iterations = {city:int(max_iter/10) for city,max_iter in max_iterations.items()}
-# max_iterations = {city:10 for city,max_iter in max_iterations.items()}
+# max_iterations = {city:int(max_iter/1.5) for city,max_iter in max_iterations.items()}
+# max_iterations = {city:10 for city, max_iter in max_iterations.items()}
 
 iterations_nums = {city:[int(p * max_iterations[city]) for p in np.linspace(0.2, 1.0, 4)] for city in max_iterations}
 
@@ -50,7 +50,7 @@ def instance_map(instance_name: str) -> str:
         >>> get_instance_type("instRS3")
         'real'
     """
-    if not instance_name.startswith("inst") or len(instance_name) < 5:
+    if ((not instance_name.startswith("inst")) or (len(instance_name) < 5)) and (instance_name[0]!='N'):
         raise ValueError(f"Invalid instance name: {instance_name}")
 
     code_letter = instance_name[4].upper()
@@ -59,6 +59,8 @@ def instance_map(instance_name: str) -> str:
         return "artif"
     elif code_letter == "R":
         return "real"
+    elif instance_name[0].upper() == 'N':
+        return 'simu'
     else:
         raise ValueError(f"Unrecognized instance type in: {instance_name}")
 
@@ -78,7 +80,7 @@ def fechas_map(instance_name: str) -> str:
         >>> get_instance_type("instRS3")
         'real'
     """
-    if not instance_name.startswith("inst") or len(instance_name) < 5:
+    if ((not instance_name.startswith("inst")) or (len(instance_name) < 5)) and (instance_name[0]!='N'):
         raise ValueError(f"Invalid instance name: {instance_name}")
 
     code_letter = instance_name[4].upper()
@@ -87,6 +89,8 @@ def fechas_map(instance_name: str) -> str:
         return pd.date_range("2026-01-05", "2026-01-11").strftime("%Y-%m-%d").tolist()
     elif code_letter == "R":
         return pd.date_range("2025-07-21", "2025-07-27").strftime("%Y-%m-%d").tolist()
+    elif instance_name[0] == 'N':
+        return ['2026-11-11']
     else:
         raise ValueError(f"Unrecognized instance type in: {instance_name}")
 

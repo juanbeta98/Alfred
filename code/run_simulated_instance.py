@@ -1,6 +1,12 @@
 import os
 
 from src.utils.utils import build_algos_header, process_instance_selection, safe_run
+from src.config.SD_experimentation_config import (
+    n_services,
+    scenarios,
+    seeds
+)
+
 from src.run.run_baselines import run_online_hist_baseline, run_online_algo_baseline, run_online_algo_baseline_parallel
 from src.run.run_ONLINE_static import run_ONLINE_static
 from src.run.run_INSERT import run_INSERT
@@ -9,39 +15,40 @@ from src.run.run_INSERT_BUFFER import run_INSERT_BUFFER
 from src.run.run_REACT_BUFFER import run_REACT_BUFFER
 # from src.run.run_ALFRED import run_ALFRED
 
-def main():
+def main(n_serv, scenario, seed):
     # ====== MANUAL DEBUG CONFIGURATION ======
     DEBUG_MODE = False  # ⬅ Set to False when running from the command line
-    DEFAULT_INSTANCE = "instAD2b"
-    DEFAULT_DISTANCE_METHOD = 'haversine'
-    DEFAULT_SAVE = False
+    # DEFAULT_INSTANCE = "N500"
+    instance = f'N{n_serv}/{scenario}/seed_{seed}'
+    distance_method = 'haversine' 
+    save_results = True
 
     # ====== Run configuration ======
     optimization_obj = 'driver_distance'         # Options: ['hybrid', 'driver_distance', 'driver_extra_time']
     multiprocessing = True
-    n_processes = os.cpu_count()
+    # n_processes = os.cpu_count() - 2
+    n_processes = 1
 
-    run_historic_baseline = True
     run_algo_baseline = True
-    run_online_static_algo = True
-    run_INSERT_algo = True
-    run_INSERT_BUFFER_algo = True
-    run_REACT_algo = True
-    run_REACT_BUFFER_algo = True
+    run_online_static_algo = False
+    run_INSERT_algo = False
+    run_INSERT_BUFFER_algo = False
+    run_REACT_algo = False
+    run_REACT_BUFFER_algo = False
     
     run_ALFRED_algo = False
 
     # ====== Instance selection ======    
-    instance, distance_method, save_results = process_instance_selection(
-        DEBUG_MODE,
-        DEFAULT_INSTANCE,
-        DEFAULT_DISTANCE_METHOD,
-        DEFAULT_SAVE
-    )
+    # instance, distance_method, save_results = process_instance_selection(
+    #     #DEBUG_MODE,
+    #     #DEFAULT_INSTANCE,
+    #     DEFAULT_DISTANCE_METHOD,
+    #     DEFAULT_SAVE
+    # )
 
     # ====== Run header ======
     build_algos_header(
-        run_historic_baseline,
+        False,
         run_algo_baseline,
         run_online_static_algo,
         run_INSERT_algo,
@@ -56,16 +63,7 @@ def main():
         multiprocessing
     )
 
-    # ====== Algorithm running ======
-    if run_historic_baseline:
-        safe_run(
-            'historic baseline',
-            run_online_hist_baseline,
-            instance,
-            distance_method=distance_method,
-            save_results=save_results
-        )
-    
+    # ====== Algorithm running ======    
     if run_algo_baseline:
         safe_run(
             "algorithm offline baseline",
@@ -150,4 +148,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+
+    for n_serv in n_services:
+        for scenario in scenarios:
+            for seed in seeds:    
+                
+                main(n_serv, scenario, seed)
