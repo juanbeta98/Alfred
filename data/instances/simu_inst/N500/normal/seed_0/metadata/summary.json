@@ -1,0 +1,78 @@
+{
+  "sim_day": "2026-11-11",
+  "n_services": 500,
+  "scenario": "normal",
+  "seed": 0,
+  "per_city": {
+    "1": {
+      "n_total": 84,
+      "historic_static_mean": 0.7832369942196532,
+      "historic_dynamic_mean": 0.21676300578034682,
+      "multiplier": 1.027392337464291,
+      "static_prop_sim": 0.8046916862798349,
+      "dynamic_prop_sim": 0.1953083137201651,
+      "n_static": 68,
+      "n_dynamic": 16
+    },
+    "1004": {
+      "n_total": 100,
+      "historic_static_mean": 0.8284313725490197,
+      "historic_dynamic_mean": 0.1715686274509804,
+      "multiplier": 0.9539573427527741,
+      "static_prop_sim": 0.7902881908098962,
+      "dynamic_prop_sim": 0.2097118091901038,
+      "n_static": 79,
+      "n_dynamic": 21
+    },
+    "126": {
+      "n_total": 16,
+      "historic_static_mean": 0.6818181818181818,
+      "historic_dynamic_mean": 0.3181818181818182,
+      "multiplier": 0.908194704787239,
+      "static_prop_sim": 0.6192236623549356,
+      "dynamic_prop_sim": 0.38077633764506436,
+      "n_static": 10,
+      "n_dynamic": 6
+    },
+    "149": {
+      "n_total": 287,
+      "historic_static_mean": 0.6882453151618398,
+      "historic_dynamic_mean": 0.31175468483816016,
+      "multiplier": 0.9033055271057059,
+      "static_prop_sim": 0.6216957971902984,
+      "dynamic_prop_sim": 0.37830420280970156,
+      "n_static": 178,
+      "n_dynamic": 109
+    },
+    "150": {
+      "n_total": 4,
+      "historic_static_mean": 0.3125,
+      "historic_dynamic_mean": 0.6875,
+      "multiplier": 1.0626540478400546,
+      "static_prop_sim": 0.33207938995001707,
+      "dynamic_prop_sim": 0.6679206100499829,
+      "n_static": 1,
+      "n_dynamic": 3
+    },
+    "830": {
+      "n_total": 1,
+      "historic_static_mean": 1.0,
+      "historic_dynamic_mean": 0.0,
+      "multiplier": 1.0825511154555445,
+      "static_prop_sim": 1.0,
+      "dynamic_prop_sim": 0.0,
+      "n_static": 1,
+      "n_dynamic": 0
+    },
+    "844": {
+      "n_total": 8,
+      "historic_static_mean": 0.5151515151515151,
+      "historic_dynamic_mean": 0.48484848484848486,
+      "multiplier": 1.021327155153436,
+      "static_prop_sim": 0.5261382314426791,
+      "dynamic_prop_sim": 0.4738617685573209,
+      "n_static": 4,
+      "n_dynamic": 4
+    }
+  }
+}
