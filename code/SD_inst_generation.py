@@ -30,7 +30,7 @@ import numpy as np
 
 # PROJECT imports (adjust paths if necessary)
 from src.data.data_load import load_tables
-from src.utils.inst_generation_utils import filter_invalid_services, create_hist_directory
+from src.utils.inst_generation_utils import filter_invalid_services, create_hist_directory, add_labor_sequence
 from src.config.SD_experimentation_config import *
 
 # ---------------------------------------------------------------------
@@ -361,6 +361,9 @@ def simulate_artificial_day(
 
     # Filter invalid services
     labors_filtered_df = filter_invalid_services(labors_raw_df, min_delay_minutes=0, only_unilabor_services=False)
+
+    # ------ Define labor sequence order ------
+    labors_filtered_df = add_labor_sequence(labors_filtered_df)
 
     # Ensure datetime columns exist and are datetime
     # Accept either 'schedule_date' or 'labor_start_date' as the schedule column; prefer 'schedule_date'.
