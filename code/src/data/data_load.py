@@ -316,11 +316,14 @@ def upload_ONLINE_static_solution(
 
     upload_path = f"{inst_path}/res_algo_ONLINE_static.pkl"
 
+    print(upload_path)
+
     if not os.path.exists(upload_path):
-        return pd.DataFrame(), pd.DataFrame()
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
     with open(upload_path, "rb") as f:
         res = pickle.load(f)
+        print(upload_path)
         results_df, moves_df, postponed_labors = res
 
     if not results_df.empty:

@@ -46,7 +46,6 @@ def run_INSERT(
     ) = prep_online_algorithm_inputs(instance, distance_method, optimization_obj)
 
     labors_dynamic_df["latest_arrival_time"] = labors_dynamic_df["schedule_date"] + timedelta(minutes=TIEMPO_GRACIA)
-
     unassigned_services = []
 
     # --- Ejecución por ciudad y fecha ---

@@ -224,8 +224,7 @@ def prep_online_algorithm_inputs(instance, distance_method, optimization_obj):
     labors_algo_static_df, moves_algo_static_df, postponed_labors = upload_ONLINE_static_solution(
         data_path, 
         instance, 
-        distance_method, 
-        optimization_obj
+        distance_method
     )
 
     labors_algo_dynamic_df = labors_algo_static_df.copy()

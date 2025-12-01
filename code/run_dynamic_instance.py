@@ -21,9 +21,9 @@ def main():
     multiprocessing = True
     n_processes = os.cpu_count()
 
-    run_historic_baseline = True
-    run_algo_baseline = True
-    run_online_static_algo = True
+    run_historic_baseline = False
+    run_algo_baseline = False
+    run_online_static_algo = False
     run_INSERT_algo = True
     run_INSERT_BUFFER_algo = True
     run_REACT_algo = True
