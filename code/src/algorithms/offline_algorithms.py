@@ -57,7 +57,8 @@ def run_assignment_algorithm(
 
     # --- Lógica de asignación principal ---
     for _, row in df_sorted.iterrows():
-        original_idx = row['index']
+        # original_idx = row['index']
+        original_idx = row['original_idx']
         service_id = row['service_id']
 
         if service_end_times.get(service_id) is pd.NaT:
@@ -448,13 +449,20 @@ def init_historic_drivers(
     return conductores
 
 
+# def prepare_iteration_data(df_cleaned: pd.DataFrame) -> pd.DataFrame:
+#     return (
+#         df_cleaned.copy()
+#         .reset_index()
+#         .sort_values("schedule_date", kind="stable")  # stable keeps tie order
+#         .reset_index(drop=True)
+#     )
+
 def prepare_iteration_data(df_cleaned: pd.DataFrame) -> pd.DataFrame:
-    return (
-        df_cleaned.copy()
-        .reset_index()
-        .sort_values("schedule_date", kind="stable")  # stable keeps tie order
-        .reset_index(drop=True)
-    )
+    df = df_cleaned.copy().reset_index(drop=False)
+    df = df.rename(columns={"index": "original_idx"})
+    df = df.sort_values("schedule_date", kind="stable").reset_index(drop=True)
+    return df
+
 
 
 def assign_task_to_driver(  
