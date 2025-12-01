@@ -225,6 +225,8 @@ def _prepare_algo_baseline_pipeline(
     )
 
     df_cleaned_template = filter_labores(df_cleaned_template, hour_threshold=0)
+    df_cleaned_template = df_cleaned_template.reset_index(drop=True)
+
 
     return df_cleaned_template
 
