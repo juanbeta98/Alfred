@@ -360,7 +360,7 @@ def simulate_artificial_day(
     directorio_df, labors_raw_df, cities_df, duraciones_df, valid_cities = load_tables(data_path, generate_labors=False)
 
     # Filter invalid services
-    labors_filtered_df = filter_invalid_services(labors_raw_df, min_delay_minutes=0, only_unilabor_services=False)
+    labors_filtered_df = filter_invalid_services(labors_raw_df, min_delay_minutes=120, only_unilabor_services=False)
 
     # ------ Define labor sequence order ------
     labors_filtered_df = add_labor_sequence(labors_filtered_df)
@@ -470,32 +470,7 @@ def simulate_artificial_day(
     )
 
     # Return for programmatic use
-    return simulated_shifted, sampling_plan, out_paths
-
-# ---------------------------------------------------------------------
-# CLI / Example driver
-# ---------------------------------------------------------------------
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Simulate an artificial single-day instance (service-level sampling).")
-    parser.add_argument("--data_path", default="../data", help="Base data path")
-    parser.add_argument("--month", default="2025-06", help="Source month (YYYY-MM)")
-    parser.add_argument("--sim_day", default="2026-11-11", help="Simulated day (YYYY-MM-DD)")
-    parser.add_argument("--n_services", type=int, default=400, help="Number of SERVICES to sample")
-    parser.add_argument("--seed", type=int, default=42, help="Random seed")
-    parser.add_argument("--scenario", type=str, default="normal", choices=["easy", "normal", "hard"], help="Scenario difficulty (affects static/dynamic proportion)")
-    args = parser.parse_args()
-
-    df_sim, plan, paths = simulate_artificial_day(
-        data_path=args.data_path,
-        month=args.month,
-        sim_day=args.sim_day,
-        n_services=args.n_services,
-        seed=args.seed,
-        scenario=args.scenario
-    )
-
-    
-    
+    return simulated_shifted, sampling_plan, out_paths    
 
 
 # ---------------------------------------------------------------------

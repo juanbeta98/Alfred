@@ -21,7 +21,7 @@ def main(n_serv, scenario, seed):
     # DEFAULT_INSTANCE = "N500"
     instance = f'N{n_serv}/{scenario}/seed_{seed}'
     distance_method = 'haversine' 
-    save_results = True
+    save_results = False
 
     # ====== Run configuration ======
     optimization_obj = 'driver_distance'         # Options: ['hybrid', 'driver_distance', 'driver_extra_time']
@@ -29,8 +29,8 @@ def main(n_serv, scenario, seed):
     # n_processes = os.cpu_count() - 2
     n_processes = 1
 
-    run_algo_baseline = True
-    run_online_static_algo = False
+    run_algo_baseline = False
+    run_online_static_algo = True
     run_INSERT_algo = False
     run_INSERT_BUFFER_algo = False
     run_REACT_algo = False
