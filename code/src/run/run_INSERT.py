@@ -144,6 +144,10 @@ def run_INSERT(
                 moves_algo_dynamic_df = tmp_moves
             else:
                 unassigned_services.append(service_df)
+
+                # Cleanup logic, include all the services in the
+                service_df['actual_status'] = 'FAILED'
+                labors_algo_dynamic_df = pd.concat([labors_algo_dynamic_df, service_df])
     
     postponed_labors += new_postponed_labors
 

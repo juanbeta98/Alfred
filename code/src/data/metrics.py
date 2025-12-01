@@ -95,8 +95,13 @@ def collect_vt_metrics_range(
         day_str = d.strftime('%Y-%m-%d')
 
         # Llamar a vt_metrics (se asume que devuelve un dict con la estructura esperada)
-        m = vt_metrics(df_in, day_str=day_str, workday_hours=workday_hours, 
-                       dist_dict=dist_dict, assignment_type=assignment_type)
+        m = vt_metrics(
+            df_in, 
+            day_str=day_str, 
+            workday_hours=workday_hours, 
+            dist_dict=dist_dict, 
+            assignment_type=assignment_type
+        )
 
         # --- Calcular utilización promedio como float ---
         if not m["trabajo_por_conductor_df"].empty:

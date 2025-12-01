@@ -91,7 +91,8 @@ def build_algos_header(
     optimization_obj: str,
     distance_method: str,
     save_results: bool,
-    multiprocessing: bool
+    multiprocessing: bool,
+    experiment_type: str = 'Artificial Instances'
 ):
     active_algos = []
     if run_historic_baseline:
@@ -115,8 +116,9 @@ def build_algos_header(
 
     # Pretty header
     print("\n" + "=" * 120)
-    print(f"🚀 Running Online Orchestration for {instance}")
+    print(f"🚀 Running Orchestration - {experiment_type}")
     print("=" * 120)
+    print(f"📏 Instance               : {instance}")
     print(f"⌚️ Start time             : {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}")
     print(f"🎯 Optimization objective : {optimization_obj}")
     print(f"📏 Distance method        : {distance_method}")

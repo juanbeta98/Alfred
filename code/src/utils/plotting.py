@@ -39,8 +39,12 @@ def plot_metrics_comparison_dynamic(
     # Compute metrics for each algorithm
     metrics_by_algo = {}
     for algo in algorithms:
+        print('\n')
         df = compute_metrics_with_moves(
-            algo["labors_df"], algo["moves_df"], fechas, dist_dict,
+            algo["labors_df"], 
+            algo["moves_df"], 
+            fechas, 
+            dist_dict,
             workday_hours=8,
             city=city,
             assignment_type=algo["type"],

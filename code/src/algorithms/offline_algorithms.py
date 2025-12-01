@@ -177,6 +177,14 @@ def run_assignment_algorithm(
     
     df_result['dist_km'] = distances
 
+    failed_services = [value for key,value in service_end_times.items() if value is pd.NaT]    
+    df_result['actual_status'] = df_result['service_id'].apply(lambda x: 'FAILED' if x in failed_services else 'COMPLETED')
+    
+    solution_cols = ['assigned_driver', 'actual_start', 'actual_end']
+    for col in solution_cols:
+        if col in df_result.columns:
+            df_result[col] = df_result.apply(lambda x: pd.NA if x['actual_status']=='FAILED' else x[col], axis=1)
+
     # — Reconstrucción de movimientos y tiempos libres —
     df_moves = build_driver_movements(
         labors_df=df_result, 

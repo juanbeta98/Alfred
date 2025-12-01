@@ -60,7 +60,8 @@ def main(n_serv, scenario, seed):
         optimization_obj,
         distance_method,
         save_results,
-        multiprocessing
+        multiprocessing,
+        experiment_type='Simulated Instances'
     )
 
     # ====== Algorithm running ======    

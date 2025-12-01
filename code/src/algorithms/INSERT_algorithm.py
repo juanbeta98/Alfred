@@ -1293,6 +1293,7 @@ def commit_new_labor_insertion(
     new_labor_row["start_address_point"] = new_labor_move_row["start_point"]
     new_labor_row["end_address_point"] = new_labor_move_row["end_point"]
     new_labor_row["date"] = new_labor_move_row["date"]
+    new_labor_row['actual_status'] = 'COMPLETED'
     new_labor_row["n_drivers"] = np.nan  # Can be filled later
 
     # Remove existing row if any (to prevent duplicates)
