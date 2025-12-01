@@ -20,6 +20,7 @@ def run_INSERT(
     optimization_obj: str,
     distance_method: str,
     save_results: bool,
+    experiment_type: str = 'online_operation'
 ):
     """
     Ejecuta la simulación online dinámica para una instancia dada.
@@ -154,7 +155,7 @@ def run_INSERT(
         # ------ Ensure output directory exists ------
         output_dir = os.path.join(data_path, 
                                     "resultados", 
-                                    "online_operation", 
+                                    experiment_type, 
                                     instance,
                                     distance_method
                                     )

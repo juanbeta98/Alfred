@@ -167,6 +167,7 @@ def run_INSERT_BUFFER(
     save_results: bool = True,
     multiprocessing: bool = True,
     n_processes: int = None,
+    experiment_type: str = 'online_operation'
 ):
     """
     Insertion buffer: batches incoming orders, then tries randomized insertion iterations for each batch.
@@ -340,17 +341,17 @@ def run_INSERT_BUFFER(
     # consolidate and save
     results_df, moves_df = concat_run_results(run_results)
     if save_results:
-        output_dir = os.path.join(data_path, "resultados", "online_operation", instance, distance_method)
+        output_dir = os.path.join(data_path, "resultados", experiment_type, instance, distance_method)
         os.makedirs(output_dir, exist_ok=True)
 
         extra_output_dir = os.path.join(output_dir, 'extra_info')
         os.makedirs(extra_output_dir, exist_ok=True)  # Creates folder if missing
 
-        with open(os.path.join(output_dir, "res_algo_INSERT_BUFFER.pkl"), "wb") as f:
+        with open(os.path.join(output_dir, "res_algo_BUFFER_FIXED.pkl"), "wb") as f:
             pickle.dump([results_df, moves_df, postponed_labors], f)
 
-        pd.DataFrame(all_batch_metrics).to_csv(os.path.join(extra_output_dir, "INSERT_BUFFER_batch_metrics.csv"), index=False)
-        pd.DataFrame(all_traces).to_csv(os.path.join(extra_output_dir, "INSERT_BUFFER_traces.csv"), index=False)
+        pd.DataFrame(all_batch_metrics).to_csv(os.path.join(extra_output_dir, "BUFFER_FIXED_batch_metrics.csv"), index=False)
+        pd.DataFrame(all_traces).to_csv(os.path.join(extra_output_dir, "BUFFER_FIXED_traces.csv"), index=False)
 
     print(f"\n ✅ INSERT_BUFFER finished in {round(perf_counter() - global_start, 1)}s\n")
     return True

@@ -1,6 +1,74 @@
+import os
+import pickle
+import pandas as pd
+from datetime import timedelta
+
+import json
+
+from time import perf_counter
+from tqdm import tqdm
+from itertools import product
+
+from src.algorithms.INSERT_algorithm import insert_single_labor, get_drivers, filter_dynamic_df
+from src.algorithms.ALFRED_algorithm import generate_alfred_parameters, load_alfred_parameters
+from src.utils.utils import prep_online_algorithm_inputs, compute_workday_end
+from src.config.experimentation_config import *
+from src.config.config import *
+
+from src.utils.filtering import flexible_filter
 
 
 
+def run_ALFRED(
+    instance: str,
+    optimization_obj: str,
+    distance_method: str,
+    time_previous_freeze: int,
+    batch_interval_minutes: int = 30,
+    start_of_day_str: str = "07:00",
+    save_results: bool = True,
+    multiprocessing: bool = True,
+    n_processes: int = None,
+    experiment_type: str = 'online_operation'
+):
 
-def run_ALFRED():
-    pass
+    (
+        data_path,
+        assignment_type,
+        driver_init_mode,
+        duraciones_df,
+        valid_cities, 
+        labors_real_df,
+        directorio_hist_df,
+        global_dist_dict,
+        fechas,
+        alpha,
+        labors_dynamic_df,
+        labors_algo_dynamic_df,
+        moves_algo_dynamic_df,
+        postponed_labors
+    ) = prep_online_algorithm_inputs(
+        instance, 
+        distance_method, 
+        optimization_obj)
+
+    for fecha in fechas:
+        print(f"{'-'*120}\n▶ Processing date: {fecha} / {fechas[-1]}")
+        
+        for city in valid_cities:
+
+            for decision_point in decision_times:
+                
+                generate_alfred_parameters(
+                    decision_point,
+                    experiment_type=experiment_type,
+                    dist_method = distance_method,
+                    )
+
+                run_parameters = 
+
+    #       For each decision time
+    #           Write paramter file
+    #           Call alfred_algorithm(
+    #               inputs:  complete day df (either static or dynamic),
+    #                        parameter file) 

@@ -321,7 +321,6 @@ def upload_ONLINE_static_solution(
 
     with open(upload_path, "rb") as f:
         res = pickle.load(f)
-        print(upload_path)
         results_df, moves_df, postponed_labors = res
 
     if not results_df.empty:

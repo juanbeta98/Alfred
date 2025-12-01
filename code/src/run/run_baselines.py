@@ -28,7 +28,8 @@ from src.utils.utils import get_city_name_from_code, prep_algorithm_inputs
 def run_online_hist_baseline(
     instance: str,
     distance_method: str,
-    save_results: bool
+    save_results: bool,
+    experiment_type: str = 'online_operation'
 ):
     start = perf_counter()
 
@@ -99,7 +100,7 @@ def run_online_hist_baseline(
     if save_results:
         output_dir = os.path.join(
             save_path, 
-            "online_operation", 
+            experiment_type, 
             instance,
             distance_method
         )
@@ -118,7 +119,8 @@ def run_online_algo_baseline(
     distance_method: str,
     save_results: bool,
     multiprocessing: bool,
-    n_processes: int = None  # defaults to all available CPUs
+    n_processes: int = None,  # defaults to all available CPUs
+    experiment_type: str = 'online_operation',
 ) -> None: 
     if multiprocessing:
         run_online_algo_baseline_parallel(
@@ -310,7 +312,8 @@ def run_online_algo_baseline_parallel(
     optimization_obj: str,
     distance_method: str,
     save_results: bool,
-    n_processes: int = None  # defaults to all available CPUs
+    n_processes: int = None,  # defaults to all available CPUs
+    experiment_type: str = 'online_operation'
 ):
     
     start = perf_counter()
@@ -390,7 +393,7 @@ def run_online_algo_baseline_parallel(
     results_df, moves_df = concat_run_results(run_results)
 
     if save_results:
-        output_dir = os.path.join(data_path, "resultados", "online_operation", instance, distance_method)
+        output_dir = os.path.join(data_path, "resultados", experiment_type, instance, distance_method)
         os.makedirs(output_dir, exist_ok=True)
         with open(os.path.join(output_dir, f'res_algo_OFFLINE.pkl'), "wb") as f:
             pickle.dump([results_df, moves_df, postponed_labors], f)

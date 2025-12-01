@@ -25,7 +25,8 @@ def run_ONLINE_static(
     distance_method: str,
     save_results: bool,
     multiprocessing: bool,
-    n_processes = None
+    n_processes = None,
+    experiment_type: str = 'online_operation'
 ):
     if multiprocessing: 
         run_ONLINE_static_parallel(
@@ -201,7 +202,8 @@ def run_ONLINE_static_parallel(
     optimization_obj: str,
     distance_method: str,
     save_results: bool,
-    n_processes: int = None  # defaults to all available CPUs
+    n_processes: int = None,  # defaults to all available CPUs
+    experiment_type: str = 'online_operation',
 ):
     
     start = perf_counter()
@@ -285,7 +287,7 @@ def run_ONLINE_static_parallel(
     results_df, moves_df = concat_run_results(run_results)
 
     if save_results:
-        output_dir = os.path.join(data_path, "resultados", "online_operation", instance, distance_method)
+        output_dir = os.path.join(data_path, "resultados", experiment_type, instance, distance_method)
         os.makedirs(output_dir, exist_ok=True)
         with open(os.path.join(output_dir, f'res_algo_ONLINE_static.pkl'), "wb") as f:
             pickle.dump([results_df, moves_df, postponed_labors], f)

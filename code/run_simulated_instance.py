@@ -21,20 +21,20 @@ def main(n_serv, scenario, seed):
     # DEFAULT_INSTANCE = "N500"
     instance = f'N{n_serv}/{scenario}/seed_{seed}'
     distance_method = 'haversine' 
-    save_results = False
+    save_results = True
 
     # ====== Run configuration ======
     optimization_obj = 'driver_distance'         # Options: ['hybrid', 'driver_distance', 'driver_extra_time']
     multiprocessing = True
-    # n_processes = os.cpu_count() - 2
-    n_processes = 1
+    n_processes = os.cpu_count() - 3
+    # n_processes = 1
 
-    run_algo_baseline = False
+    run_algo_baseline = True
     run_online_static_algo = True
-    run_INSERT_algo = False
-    run_INSERT_BUFFER_algo = False
-    run_REACT_algo = False
-    run_REACT_BUFFER_algo = False
+    run_INSERT_algo = True
+    run_INSERT_BUFFER_algo = True
+    run_REACT_algo = True
+    run_REACT_BUFFER_algo = True
     
     run_ALFRED_algo = False
 
@@ -150,7 +150,7 @@ def main(n_serv, scenario, seed):
 
 if __name__ == "__main__":
 
-    for n_serv in n_services:
+    for n_serv in n_services[::-1]:
         for scenario in scenarios:
             for seed in seeds:    
                 

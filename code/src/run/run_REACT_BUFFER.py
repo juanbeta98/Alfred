@@ -428,6 +428,7 @@ def run_REACT_BUFFER(
     save_results: bool = True,
     multiprocessing: bool = True,
     n_processes: int = None,
+    experiment_type: str = 'online_operation'
 ):
     """
     Run REACT_BUFFER (fixed: avoid duplicate rows by appending only final snapshot per city/date).
@@ -622,12 +623,12 @@ def run_REACT_BUFFER(
     postponed_labors += new_postponed_labors
 
     if batch_interval_minutes == 0:
-        algorithm = 'REACT_BUFFER_0'
+        algorithm = 'REACT'
     else:
-        algorithm = 'REACT_BUFFER'
+        algorithm = 'BUFFER_REACT'
 
     if save_results:
-        output_dir = os.path.join(data_path, "resultados", "online_operation", instance, distance_method)
+        output_dir = os.path.join(data_path, "resultados", experiment_type, instance, distance_method)
         os.makedirs(output_dir, exist_ok=True)
 
         extra_output_dir = os.path.join(output_dir, 'extra_info')
