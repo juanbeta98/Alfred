@@ -544,7 +544,7 @@ def run_REACT_BUFFER(
                 labors_reassign_iter_df = attach_service_batch_to_reassign(labors_reassign_df, batch_df)
 
                 # prepare iteration parameters
-                max_iter_city = max_iterations.get(city, max(max_iterations.values()))
+                max_iter_city = max_iterations.get(city, max(max_iterations.values())) / 2
                 iterations_nums_city = iterations_nums.get(city, [])
 
                 # run iterations for this batch (sequential worker)

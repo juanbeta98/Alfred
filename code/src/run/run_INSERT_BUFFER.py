@@ -267,7 +267,7 @@ def run_INSERT_BUFFER(
                 }
 
                 # Build tasks: each task is trying a different randomized insertion ordering (seed)
-                max_iter_city = max_iterations.get(city, max(max_iterations.values()))
+                max_iter_city = max_iterations.get(city, max(max_iterations.values())) / 2 
                 tasks = []
                 for seed in range(1, max_iter_city + 1):
                     tasks.append({
