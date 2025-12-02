@@ -21,13 +21,13 @@ hyperparameter_selection = {
 }
 
 max_iterations = {
-    '149': 500,
-        '1': 250,
-        '1004': 250,
-        '126': 30,
-        '150': 30,
-        '844': 30,
-        '830': 30,
+    '149': 750,
+        '1': 300,
+        '1004': 300,
+        '126': 60,
+        '150': 60,
+        '844': 60,
+        '830': 60,
 }
 
 # max_iterations = {city:int(max_iter/1.5) for city,max_iter in max_iterations.items()}

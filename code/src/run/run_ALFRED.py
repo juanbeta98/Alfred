@@ -9,7 +9,6 @@ from time import perf_counter
 from tqdm import tqdm
 from itertools import product
 
-from src.algorithms.INSERT_algorithm import insert_single_labor, get_drivers, filter_dynamic_df
 from src.algorithms.ALFRED_algorithm import (
     generate_alfred_parameters, 
     load_alfred_parameters,
@@ -70,8 +69,6 @@ def run_ALFRED(
 
             dist_dict_city = global_dist_dict.get(city, {})
 
-            # labors_algo_dynamic_df.to_csv('labors_', index=False)
-
             for decision_point in decision_times:
                 
                 generate_alfred_parameters(
@@ -92,8 +89,5 @@ def run_ALFRED(
                     alfred_parameters
                 )
 
-
-
-    #           Call alfred_algorithm(
-    #               inputs:  complete day df (either static or dynamic),
-    #                        parameter file) 
+if __name__ == '__main__':
+    run_ALFRED()

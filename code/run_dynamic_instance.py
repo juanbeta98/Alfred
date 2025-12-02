@@ -7,29 +7,30 @@ from src.run.run_INSERT import run_INSERT
 from src.run.run_INSERT_BUFFER import run_INSERT_BUFFER
 # # from src.run.run_REACT import run_REACT
 from src.run.run_REACT_BUFFER import run_REACT_BUFFER
-# from src.run.run_ALFRED import run_ALFRED
+from src.run.run_ALFRED import run_ALFRED
 
 def main():
     # ====== MANUAL DEBUG CONFIGURATION ======
-    DEBUG_MODE = False  # ⬅ Set to False when running from the command line
-    DEFAULT_INSTANCE = "instAD2b"
+    DEBUG_MODE = True  # ⬅ Set to False when running from the command line
+    DEFAULT_INSTANCE = "instAD4"
     DEFAULT_DISTANCE_METHOD = 'haversine'
     DEFAULT_SAVE = False
 
     # ====== Run configuration ======
     optimization_obj = 'driver_distance'         # Options: ['hybrid', 'driver_distance', 'driver_extra_time']
+    experiment_type = 'online_operation'
     multiprocessing = True
     n_processes = os.cpu_count()
 
-    run_historic_baseline = True
-    run_algo_baseline = True
-    run_online_static_algo = True
-    run_INSERT_algo = True
-    run_INSERT_BUFFER_algo = True
-    run_REACT_algo = True
-    run_REACT_BUFFER_algo = True
+    run_historic_baseline = False
+    run_algo_baseline = False
+    run_online_static_algo = False
+    run_INSERT_algo = False
+    run_INSERT_BUFFER_algo = False
+    run_REACT_algo = False
+    run_REACT_BUFFER_algo = False
     
-    run_ALFRED_algo = False
+    run_ALFRED_algo = True
 
     # ====== Instance selection ======    
     instance, distance_method, save_results = process_instance_selection(
@@ -63,7 +64,8 @@ def main():
             run_online_hist_baseline,
             instance,
             distance_method=distance_method,
-            save_results=save_results
+            save_results=save_results,
+            experiment_type=experiment_type
         )
     
     if run_algo_baseline:
@@ -75,7 +77,8 @@ def main():
             distance_method=distance_method,
             save_results=save_results,
             multiprocessing=multiprocessing,
-            n_processes=n_processes
+            n_processes=n_processes,
+            experiment_type=experiment_type
         )
 
 
@@ -88,7 +91,8 @@ def main():
             distance_method=distance_method,
             save_results=save_results,
             multiprocessing=multiprocessing,
-            n_processes=n_processes
+            n_processes=n_processes,
+            experiment_type=experiment_type
         )
     
     if run_INSERT_algo:
@@ -98,7 +102,8 @@ def main():
             instance,
             optimization_obj=optimization_obj,
             distance_method=distance_method,
-            save_results=save_results
+            save_results=save_results,
+            experiment_type=experiment_type
         )
     
     if run_INSERT_BUFFER_algo:
@@ -111,7 +116,8 @@ def main():
             save_results=save_results,
             batch_interval_minutes=30,
             multiprocessing=multiprocessing,
-            n_processes=n_processes
+            n_processes=n_processes,
+            experiment_type=experiment_type
         )
         
     if run_REACT_algo:
@@ -125,7 +131,8 @@ def main():
             batch_interval_minutes=0,
             save_results=save_results,
             multiprocessing=multiprocessing,
-            n_processes=n_processes
+            n_processes=n_processes,
+            experiment_type=experiment_type
         )
     
     if run_REACT_BUFFER_algo:
@@ -138,11 +145,27 @@ def main():
             time_previous_freeze=0,
             batch_interval_minutes=30,
             save_results=save_results,
-            multiprocessing=multiprocessing
+            multiprocessing=multiprocessing,
+            n_processes=n_processes,
+            experiment_type=experiment_type
+
         )
     
     if run_ALFRED_algo:
         run_ALFRED()
+        safe_run(
+            'ALFRED',
+            run_ALFRED,
+            instance,
+            optimization_obj=optimization_obj,
+            distance_method=distance_method,
+            time_previous_freeze=0,
+            batch_interval_minutes=30,
+            save_results=save_results,
+            multiprocessing=multiprocessing,
+            n_processes=n_processes,
+            experiment_type=experiment_type
+        )
 
     print(f"\n \n✅ Full pipeline for {instance} completed successfully.\n")
     print("\n" + "=" * 120 + '\n \n')

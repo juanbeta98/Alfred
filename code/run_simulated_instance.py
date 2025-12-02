@@ -25,8 +25,9 @@ def main(n_serv, scenario, seed):
 
     # ====== Run configuration ======
     optimization_obj = 'driver_distance'         # Options: ['hybrid', 'driver_distance', 'driver_extra_time']
+    experiment_type = 'simulation'
     multiprocessing = True
-    n_processes = os.cpu_count() - 3
+    n_processes = None
     # n_processes = 1
 
     run_algo_baseline = True
@@ -61,7 +62,7 @@ def main(n_serv, scenario, seed):
         distance_method,
         save_results,
         multiprocessing,
-        experiment_type='Simulated Instances'
+        experiment_type=experiment_type
     )
 
     # ====== Algorithm running ======    
@@ -74,7 +75,8 @@ def main(n_serv, scenario, seed):
             distance_method=distance_method,
             save_results=save_results,
             multiprocessing=multiprocessing,
-            n_processes=n_processes
+            n_processes=n_processes,
+            experiment_type=experiment_type
         )
 
 
@@ -87,7 +89,8 @@ def main(n_serv, scenario, seed):
             distance_method=distance_method,
             save_results=save_results,
             multiprocessing=multiprocessing,
-            n_processes=n_processes
+            n_processes=n_processes,
+            experiment_type=experiment_type
         )
     
     if run_INSERT_algo:
@@ -97,7 +100,8 @@ def main(n_serv, scenario, seed):
             instance,
             optimization_obj=optimization_obj,
             distance_method=distance_method,
-            save_results=save_results
+            save_results=save_results,
+            experiment_type=experiment_type
         )
     
     if run_INSERT_BUFFER_algo:
@@ -110,7 +114,8 @@ def main(n_serv, scenario, seed):
             save_results=save_results,
             batch_interval_minutes=30,
             multiprocessing=multiprocessing,
-            n_processes=n_processes
+            n_processes=n_processes,
+            experiment_type=experiment_type
         )
         
     if run_REACT_algo:
@@ -124,7 +129,8 @@ def main(n_serv, scenario, seed):
             batch_interval_minutes=0,
             save_results=save_results,
             multiprocessing=multiprocessing,
-            n_processes=n_processes
+            n_processes=n_processes,
+            experiment_type=experiment_type
         )
     
     if run_REACT_BUFFER_algo:
@@ -137,7 +143,8 @@ def main(n_serv, scenario, seed):
             time_previous_freeze=0,
             batch_interval_minutes=30,
             save_results=save_results,
-            multiprocessing=multiprocessing
+            multiprocessing=multiprocessing,
+            experiment_type=experiment_type
         )
     
     if run_ALFRED_algo:
