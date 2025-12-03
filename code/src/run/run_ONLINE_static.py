@@ -34,7 +34,8 @@ def run_ONLINE_static(
             optimization_obj=optimization_obj,
             distance_method=distance_method,
             save_results=save_results,
-            n_processes=n_processes
+            n_processes=n_processes,
+            experiment_type=experiment_type
         )
     else:
         run_ONLINE_static_sequential(

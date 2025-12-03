@@ -454,7 +454,8 @@ def run_REACT_BUFFER(
     ) = prep_online_algorithm_inputs(
         instance, 
         distance_method, 
-        optimization_obj)
+        optimization_obj,
+        experiment_type=experiment_type)
 
     labors_algo_dynamic_df = rename_old_solution_columns(labors_algo_dynamic_df)
 

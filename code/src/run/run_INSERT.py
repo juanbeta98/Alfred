@@ -44,7 +44,11 @@ def run_INSERT(
         labors_algo_dynamic_df,
         moves_algo_dynamic_df,
         postponed_labors
-    ) = prep_online_algorithm_inputs(instance, distance_method, optimization_obj)
+    ) = prep_online_algorithm_inputs(
+        instance, 
+        distance_method, 
+        optimization_obj,
+        experiment_type=experiment_type)
 
     labors_dynamic_df["latest_arrival_time"] = labors_dynamic_df["schedule_date"] + timedelta(minutes=TIEMPO_GRACIA)
     unassigned_services = []

@@ -13,5 +13,5 @@ TIEMPO_FINALIZACION     = 15
 WORKDAY_END             = '20:00'
 # OSRM_URL                = "http://router.project-osrm.org/route/v1/driving/"
 OSRM_URL = "http://localhost:5050/route/v1/driving/"
-# REPO_PATH = '/Users/juanbeta/Library/CloudStorage/GoogleDrive-juan.beta98@gmail.com/My Drive/Work/Alfred/Alfred'
-REPO_PATH = '/Users/beta/Desktop/JuanBeta/Alfred'
+REPO_PATH = '/Users/juanbeta/Library/CloudStorage/GoogleDrive-juan.beta98@gmail.com/My Drive/Work/Alfred/Alfred'
+# REPO_PATH = '/Users/beta/Desktop/JuanBeta/Alfred'
