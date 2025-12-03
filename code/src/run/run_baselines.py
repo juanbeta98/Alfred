@@ -128,7 +128,8 @@ def run_online_algo_baseline(
             optimization_obj=optimization_obj,
             distance_method=distance_method,
             save_results=save_results,
-            n_processes=n_processes
+            n_processes=n_processes,
+            experiment_type=experiment_type
         )
     else:
         run_online_algo_baseline_sequential(
@@ -143,7 +144,7 @@ def run_online_algo_baseline_sequential(
     instance: str,
     optimization_obj: str,
     distance_method: str,
-    save_results: bool
+    save_results: bool,
 ):
     data_path = f'{REPO_PATH}/data'
     
@@ -393,10 +394,19 @@ def run_online_algo_baseline_parallel(
     results_df, moves_df = concat_run_results(run_results)
 
     if save_results:
-        output_dir = os.path.join(data_path, "resultados", experiment_type, instance, distance_method)
+        output_dir = os.path.join(
+            data_path, 
+            "resultados", 
+            experiment_type, 
+            instance, 
+            distance_method
+        )
+
         os.makedirs(output_dir, exist_ok=True)
+
         with open(os.path.join(output_dir, f'res_algo_OFFLINE.pkl'), "wb") as f:
             pickle.dump([results_df, moves_df, postponed_labors], f)
+            
     print()
     print(f" ✅ Completed algorithm offline baseline in {round(perf_counter() - start, 1)}s total. \n")
     return True
