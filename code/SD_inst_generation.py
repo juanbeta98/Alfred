@@ -123,9 +123,9 @@ def compute_city_plan(
     if scenario_multiplier_map is None:
         # multipliers chosen so that easy -> lower dynamic (more static), hard -> more dynamic
         scenario_multiplier_map = {
-            "easy": (0.85, 0.95),    # multiplier applied to historic static mean
-            "normal": (0.95, 1.05),
-            "hard": (1.05, 1.15),
+            "hard": (0.65, 0.85),    # multiplier applied to historic static mean
+            "normal": (0.9, 1.1),
+            "easy": (1.15, 1.35),
         }
 
     if scenario not in scenario_multiplier_map:

@@ -157,7 +157,9 @@ def main(n_serv, scenario, seed):
 
 if __name__ == "__main__":
 
-    for n_serv in n_services[::-1]:
+    for n_serv in n_services[:2:]:
+    # for n_serv in n_services[2:4:]:
+    # for n_serv in n_services[4:]:
         for scenario in scenarios:
             for seed in seeds:    
                 
